@@ -101,3 +101,9 @@ ENV/
 
 *.zip
 *.pt
+
+# jburkow new
+bash_scripts/
+old_scripts/
+*.sb
+*.pth
