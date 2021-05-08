@@ -234,7 +234,7 @@ if __name__ == '__main__':
                         help='Batch size for training dataset.')
     parser.add_argument('--save_dir', type=str, required=True,
                         help='Path to log metrics and model states to.')
-    parser.add_argument('--pretrained', action='store_true', default=True,
+    parser.add_argument('--pretrained', action='store_true',
                         help='Determines whether to start with randomized or pre-trained weights.')
     parser.add_argument('--seed', type=int, default=0,
                         help='Random seed for reproducibility.')
