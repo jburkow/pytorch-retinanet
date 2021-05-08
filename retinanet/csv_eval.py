@@ -1,11 +1,8 @@
 from __future__ import print_function
 
 import numpy as np
-import json
-import os
 import matplotlib.pyplot as plt
 import torch
-
 
 
 def compute_overlap(a, b):
@@ -62,25 +59,25 @@ def _compute_ap(recall, precision):
     return ap
 
 
-def _get_detections(dataset, retinanet, score_threshold=0.05, max_detections=100, save_path=None):
+def _get_detections(dataset, retinanet, score_threshold=0.05, max_detections=100):
     """ Get the detections from the retinanet using the generator.
     The result is a list of lists such that the size is:
         all_detections[num_images][num_classes] = detections[num_detections, 4 + num_classes]
     # Arguments
         dataset         : The generator used to run images through the retinanet.
-        retinanet           : The retinanet to run on the images.
+        retinanet       : The retinanet to run on the images.
         score_threshold : The score confidence threshold to use.
         max_detections  : The maximum number of detections to use per image.
-        save_path       : The path to save the images with visualized detections to.
     # Returns
         A list of lists containing the detections for each image in the generator.
     """
     all_detections = [[None for i in range(dataset.num_classes())] for j in range(len(dataset))]
 
     retinanet.eval()
-    
+
     with torch.no_grad():
 
+        print('\nGetting detections:')
         for index in range(len(dataset)):
             data = dataset[index]
             scale = data['scale']
@@ -121,6 +118,7 @@ def _get_detections(dataset, retinanet, score_threshold=0.05, max_detections=100
                     all_detections[index][label] = np.zeros((0, 5))
 
             print('{}/{}'.format(index + 1, len(dataset)), end='\r')
+        print('')
 
     return all_detections
 
@@ -136,6 +134,7 @@ def _get_annotations(generator):
     """
     all_annotations = [[None for i in range(generator.num_classes())] for j in range(len(generator))]
 
+    print('\nGetting annotations:')
     for i in range(len(generator)):
         # load the annotations
         annotations = generator.load_annotations(i)
@@ -145,6 +144,7 @@ def _get_annotations(generator):
             all_annotations[i][label] = annotations[annotations[:, 4] == label, :4].copy()
 
         print('{}/{}'.format(i + 1, len(generator)), end='\r')
+    print('')
 
     return all_annotations
 
@@ -152,6 +152,7 @@ def _get_annotations(generator):
 def evaluate(
     generator,
     retinanet,
+    dataset='val',
     iou_threshold=0.5,
     score_threshold=0.05,
     max_detections=100,
@@ -160,7 +161,7 @@ def evaluate(
     """ Evaluate a given dataset using a given retinanet.
     # Arguments
         generator       : The generator that represents the dataset to evaluate.
-        retinanet           : The retinanet to evaluate.
+        retinanet       : The retinanet to evaluate.
         iou_threshold   : The threshold used to consider when a detection is positive or negative.
         score_threshold : The score confidence threshold to use for detections.
         max_detections  : The maximum number of detections to use per image.
@@ -168,12 +169,9 @@ def evaluate(
     # Returns
         A dict mapping class names to mAP scores.
     """
-
-
-
     # gather all detections and annotations
 
-    all_detections     = _get_detections(generator, retinanet, score_threshold=score_threshold, max_detections=max_detections, save_path=save_path)
+    all_detections     = _get_detections(generator, retinanet, score_threshold=score_threshold, max_detections=max_detections)
     all_annotations    = _get_annotations(generator)
 
     average_precisions = {}
@@ -232,28 +230,19 @@ def evaluate(
         average_precision  = _compute_ap(recall, precision)
         average_precisions[label] = average_precision, num_annotations
 
-
     print('\nmAP:')
     for label in range(generator.num_classes()):
         label_name = generator.label_to_name(label)
-        print('{}: {}'.format(label_name, average_precisions[label][0]))
-        print("Precision: ",precision[-1])
-        print("Recall: ",recall[-1])
-        
-        if save_path!=None:
-            plt.plot(recall,precision)
-            # naming the x axis 
-            plt.xlabel('Recall') 
-            # naming the y axis 
-            plt.ylabel('Precision') 
+        print(f'\t{label_name}: {average_precisions[label][0]}')
+        print("Precision: ", precision[-1])
+        print("Recall: ", recall[-1])
 
-            # giving a title to my graph 
-            plt.title('Precision Recall curve') 
+        if save_path is not None:
+            plt.plot(recall, precision)
+            plt.xlabel('Recall')
+            plt.ylabel('Precision')
+            plt.title(f'Precision Recall Curve - {dataset}')
 
-            # function to show the plot
-            plt.savefig(save_path+'/'+label_name+'_precision_recall.jpg')
+            plt.tight_layout()
 
-
-
-    return average_precisions
-
+            plt.savefig(f'{save_path}/{label_name}_{dataset}_precision_recall.png')
