@@ -1,4 +1,7 @@
 # pytorch-retinanet
+This is a fork of Yann Henon's (yhenon) `pytorch-retinanet` repo containing minor personal updates/changes. The original README is below.
+
+---
 
 ![img3](https://github.com/yhenon/pytorch-retinanet/blob/master/images/3.jpg)
 ![img5](https://github.com/yhenon/pytorch-retinanet/blob/master/images/5.jpg)
