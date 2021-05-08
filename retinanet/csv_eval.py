@@ -237,6 +237,8 @@ def evaluate(
         print("Precision: ", precision[-1])
         print("Recall: ", recall[-1])
 
+        mAP, precision, recall = average_precisions[label][0], precision[-1], recall[-1]
+
         if save_path is not None:
             plt.plot(recall, precision)
             plt.xlabel('Recall')
@@ -246,3 +248,5 @@ def evaluate(
             plt.tight_layout()
 
             plt.savefig(f'{save_path}/{label_name}_{dataset}_precision_recall.png')
+
+    return mAP, precision, recall

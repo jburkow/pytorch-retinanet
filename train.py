@@ -1,9 +1,13 @@
 import os
 import argparse
 import collections
+import random
 import time
 
 import numpy as np
+import pandas as pd
+import shutil
+import tqdm
 
 import torch
 import torch.optim as optim
@@ -16,14 +20,37 @@ from retinanet.dataloader import CocoDataset, CSVDataset, collater, Resizer, \
 
 assert torch.__version__.split('.')[0] == '1'
 
+def worker_init_fn(worker_id):
+    worker_seed = torch.initial_seed() % 2**32
+    np.random.seed(worker_seed)
+    random.seed(worker_seed)
+
+def val_worker_init_fn(worker_id):
+    np.random.seed(worker_id)
+    random.seed(worker_id)
 
 def main(parser):
     """Main Function"""
+    # Set seeds for reproducibility: https://pytorch.org/docs/stable/notes/randomness.html
+    torch.manual_seed(parser.seed)
+    np.random.seed(parser.seed)
+    random.seed(parser.seed)
+    torch.backends.cudnn.benchmark = False
+    torch.backends.cudnn.deterministic = True
+
     print(f'CUDA available: {torch.cuda.is_available()}')
 
     # Create folder to save model states to if it doesn't exist
-    if not os.path.exists(parser.snapshot_path):
-        os.mkdir(parser.snapshot_path)
+    if os.path.exists(parser.save_dir):
+        shutil.rmtree(parser.save_dir)
+    os.mkdir(parser.save_dir)
+    os.mkdir(os.path.join(parser.save_dir, 'model_states'))
+
+    # Create csv files for logging training metrics
+    train_history = pd.DataFrame({'epoch': [], 'loss': [], 'cls_loss': [], 'bbox_loss': []})
+    val_history   = pd.DataFrame({'epoch': [], 'mAP': [], 'precision': [], 'recall': []})
+    train_history.to_csv(os.path.join(parser.save_dir, 'train_history.csv'), index=False)
+    val_history.to_csv(os.path.join(parser.save_dir, 'val_history.csv'), index=False)
 
     # Create the data loaders
     if parser.dataset == 'coco':
@@ -58,23 +85,23 @@ def main(parser):
         raise ValueError('Dataset type not understood (must be csv or coco), exiting.')
 
     sampler = AspectRatioBasedSampler(dataset_train, batch_size=parser.batch, drop_last=False)
-    dataloader_train = DataLoader(dataset_train, num_workers=3, collate_fn=collater, batch_sampler=sampler)
+    dataloader_train = DataLoader(dataset_train, num_workers=8, collate_fn=collater, batch_sampler=sampler, worker_init_fn=worker_init_fn)
 
     if dataset_val is not None:
         sampler_val = AspectRatioBasedSampler(dataset_val, batch_size=1, drop_last=False)
-        dataloader_val = DataLoader(dataset_val, num_workers=3, collate_fn=collater, batch_sampler=sampler_val)
+        dataloader_val = DataLoader(dataset_val, num_workers=3, collate_fn=collater, batch_sampler=sampler_val, worker_init_fn=val_worker_init_fn)
 
     # Create the model
     if parser.depth == 18:
-        retinanet = model.resnet18(num_classes=dataset_train.num_classes(), pretrained=parser.random)
+        retinanet = model.resnet18(num_classes=dataset_train.num_classes(), pretrained=parser.pretrained)
     elif parser.depth == 34:
-        retinanet = model.resnet34(num_classes=dataset_train.num_classes(), pretrained=parser.random)
+        retinanet = model.resnet34(num_classes=dataset_train.num_classes(), pretrained=parser.pretrained)
     elif parser.depth == 50:
-        retinanet = model.resnet50(num_classes=dataset_train.num_classes(), pretrained=parser.random)
+        retinanet = model.resnet50(num_classes=dataset_train.num_classes(), pretrained=parser.pretrained)
     elif parser.depth == 101:
-        retinanet = model.resnet101(num_classes=dataset_train.num_classes(), pretrained=parser.random)
+        retinanet = model.resnet101(num_classes=dataset_train.num_classes(), pretrained=parser.pretrained)
     elif parser.depth == 152:
-        retinanet = model.resnet152(num_classes=dataset_train.num_classes(), pretrained=parser.random)
+        retinanet = model.resnet152(num_classes=dataset_train.num_classes(), pretrained=parser.pretrained)
     else:
         raise ValueError('Unsupported model depth, must be one of 18, 34, 50, 101, 152')
 
@@ -108,16 +135,19 @@ def main(parser):
     print(f'Backbone: ResNet{parser.depth}')
     print()
 
-    for epoch_num in range(parser.epochs):
+    for epoch_num in range(1, parser.epochs+1):
         epoch_start = time.perf_counter()
 
         retinanet.train()
         retinanet.module.freeze_bn()
 
-        epoch_loss = []
+        n = 0
+        running_loss = 0.
+        running_cls_loss = 0.
+        running_bbox_loss = 0.
 
-        for iter_num, data in enumerate(dataloader_train):
-            iter_start = time.perf_counter()
+        pbar = tqdm.tqdm(enumerate(dataloader_train), total=len(dataloader_train), desc=f'Epoch {epoch_num}')
+        for iter_num, data in pbar:
             try:
                 optimizer.zero_grad()
 
@@ -140,21 +170,25 @@ def main(parser):
 
                 optimizer.step()
 
-                loss_hist.append(float(loss))
+                n += data['annot'].shape[0]
+                running_loss += loss.item()
+                running_cls_loss += classification_loss.item()
+                running_bbox_loss += regression_loss.item()
 
-                epoch_loss.append(float(loss))
-
-                iter_end = time.perf_counter()
-
-                print(
-                    'Epoch: {} | Iteration: {} | {:.3} sec | Classification loss: {:1.5f} | Regression loss: {:1.5f} | Running loss: {:1.5f}'.format(
-                        epoch_num, iter_num, iter_end - iter_start, float(classification_loss), float(regression_loss), np.mean(loss_hist)))
+                pbar.set_postfix({'loss': running_loss/n, 'cls_loss': running_cls_loss/n, 'bbox_loss': running_bbox_loss/n})
 
                 del classification_loss
                 del regression_loss
             except Exception as e:
                 print(e)
                 continue
+
+        l, cls_l, box_l, t = running_loss/n, running_cls_loss/n, running_bbox_loss/n, time.perf_counter()-epoch_start
+        pbar.set_postfix({'loss': l, 'cls_loss': cls_l, 'bbox_loss': box_l, 'time': t})
+
+        # Save metrics to csv
+        current_metrics = pd.DataFrame({'epoch': [epoch_num], 'loss': [l], 'cls_loss': [cls_l], 'bbox_loss': [box_l], 'time': [t]})
+        current_metrics.to_csv(os.path.join(parser.save_dir, 'train_history.csv'), mode='a', header=False, index=False)
 
         if parser.dataset == 'coco':
 
@@ -166,16 +200,20 @@ def main(parser):
 
             print('Evaluating validation dataset')
 
-            csv_eval.evaluate(dataset_val, retinanet, save_path=parser.snapshot_path)
+            mAP, precision, recall = csv_eval.evaluate(dataset_val, retinanet, save_path=parser.save_dir)
 
-        scheduler.step(np.mean(epoch_loss))
+        # Save val metrics to csv
+        current_metrics = pd.DataFrame({'epoch': [epoch_num], 'mAP': [mAP], 'precision': [precision], 'recall': [recall]})
+        current_metrics.to_csv(os.path.join(parser.save_dir, 'val_history.csv'), mode='a', header=False, index=False)
 
-        torch.save(retinanet.module, os.path.join(parser.snapshot_path, f'{parser.dataset}_retinanet_{epoch_num}.pt'))
+        scheduler.step(mAP)
+
+        torch.save(retinanet.module, os.path.join(parser.save_dir, 'model_states', f'{parser.dataset}_retinanet_{epoch_num}.pt'))
         print(f'Time for epoch {epoch_num}: {round(time.perf_counter() - epoch_start, 2)} seconds.')
 
     retinanet.eval()
 
-    torch.save(retinanet, os.path.join(parser.snapshot_path, 'model_final.pt'))
+    torch.save(retinanet, os.path.join(parser.save_dir, 'model_final.pt'))
 
 
 if __name__ == '__main__':
@@ -194,10 +232,12 @@ if __name__ == '__main__':
                         help='Number of epochs to train for.')
     parser.add_argument('--batch', type=int, default=2,
                         help='Batch size for training dataset.')
-    parser.add_argument('--snapshot_path', type=str, required=True,
-                        help='Path to save model states to.')
-    parser.add_argument('--random', action='store_false',
+    parser.add_argument('--save_dir', type=str, required=True,
+                        help='Path to log metrics and model states to.')
+    parser.add_argument('--pretrained', action='store_true', default=True,
                         help='Determines whether to start with randomized or pre-trained weights.')
+    parser.add_argument('--seed', type=int, default=0,
+                        help='Random seed for reproducibility.')
 
     parser = parser.parse_args()
 
