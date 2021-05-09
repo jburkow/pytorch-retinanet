@@ -150,7 +150,6 @@ def main(parser):
         retinanet.train()
         retinanet.module.freeze_bn()
 
-        n = 0
         running_loss = 0.
         running_cls_loss = 0.
         running_bbox_loss = 0.
@@ -179,12 +178,11 @@ def main(parser):
 
                 optimizer.step()
 
-                n += data['annot'].shape[0]
                 running_loss += loss.item()
                 running_cls_loss += classification_loss.item()
                 running_bbox_loss += regression_loss.item()
 
-                pbar.set_postfix({'loss': running_loss/n, 'cls_loss': running_cls_loss/n, 'bbox_loss': running_bbox_loss/n})
+                pbar.set_postfix({'loss': running_loss/(iter_num+1), 'cls_loss': running_cls_loss/(iter_num+1), 'bbox_loss': running_bbox_loss/(iter_num+1)})
 
                 del classification_loss
                 del regression_loss
@@ -192,7 +190,7 @@ def main(parser):
                 print(e)
                 continue
 
-        l, cls_l, box_l, t = running_loss/n, running_cls_loss/n, running_bbox_loss/n, time.perf_counter()-epoch_start
+        l, cls_l, box_l, t = running_loss/(iter_num+1), running_cls_loss/(iter_num+1), running_bbox_loss/(iter_num+1), time.perf_counter()-epoch_start
         pbar.set_postfix({'loss': l, 'cls_loss': cls_l, 'bbox_loss': box_l, 'time': t})
 
         # Save metrics to csv
@@ -254,10 +252,7 @@ if __name__ == '__main__':
 
     parser = parser.parse_args()
 
-    # if not parser.no_normalize and parser.augment:
-    #     sys.exit('Invalid arguments: --augment and --no_normalize are not compatible.')
-
     if not parser.pretrained:
-        parser.no_normalize = True  # no ImageNet normalization if randomly intializing weights
+        parser.no_normalize = True  # no ImageNet normalization if randomly initializing weights
 
     main(parser)
