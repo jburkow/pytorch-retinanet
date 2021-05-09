@@ -6,6 +6,9 @@ import numpy as np
 import random
 import csv
 
+import albumentations as A
+import cv2
+
 from torch.utils.data import Dataset, DataLoader
 from torchvision import transforms, utils
 from torch.utils.data.sampler import Sampler
@@ -78,7 +81,7 @@ class CocoDataset(Dataset):
         if len(img.shape) == 2:
             img = skimage.color.gray2rgb(img)
 
-        return img.astype(np.float32)/255.0
+        return ((img - img.min()) / (img.max() - img.min())).astype(np.float32)  # min/max normalize to [0, 1]
 
     def load_annotations(self, image_index):
         # get ground truth annotations
@@ -374,25 +377,32 @@ class Resizer(object):
 class Augmenter(object):
     """Convert ndarrays in sample to Tensors."""
 
-    def __call__(self, sample, flip_x=0.5):
+    def __init__(self, augment=True, transform=None):
+        self.augment = augment
+        self.transform = transform
 
-        if np.random.rand() < flip_x:
-            image, annots = sample['img'], sample['annot']
-            image = image[:, ::-1, :]
+        if self.augment:
+            self.transform = A.Compose([
+                A.ShiftScaleRotate(shift_limit=0.1, scale_limit=0.5, rotate_limit=10, border_mode=cv2.BORDER_CONSTANT, value=0, p=1),
+                A.HorizontalFlip(p=0.5),
+                A.RandomBrightness(p=0.5),
+                A.RandomContrast(p=0.5)
+            ], bbox_params=A.BboxParams(format='pascal_voc', label_fields=['category_id']))
 
-            rows, cols, channels = image.shape
+    def __call__(self, sample):
+        image, annots = sample['img'], sample['annot']
 
-            x1 = annots[:, 0].copy()
-            x2 = annots[:, 2].copy()
-            
-            x_tmp = x1.copy()
+        if self.augment:
+            transformed = self.transform(image=image.astype(np.float32), bboxes=annots[:, :4], category_id=annots[:, 4])
+            transformed['bboxes'] = np.array(transformed['bboxes']).round(0).astype(int)
+            transformed['category_id'] = np.array(transformed['category_id'])
 
-            annots[:, 0] = cols - x2
-            annots[:, 2] = cols - x_tmp
-
-            sample = {'img': image, 'annot': annots}
-
-        return sample
+            if transformed['bboxes'].shape[0] == 0:  # if bbox removed by aug s.t. none remain, just undo augmentation
+                return sample
+            else:
+                return {'img': transformed['image'], 'annot': np.hstack((transformed['bboxes'], transformed['category_id'][:, np.newaxis]))}
+        else:
+            return sample
 
 
 class Normalizer(object):

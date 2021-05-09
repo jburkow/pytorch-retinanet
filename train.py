@@ -3,6 +3,7 @@ import argparse
 import collections
 import random
 import time
+import sys
 
 import numpy as np
 import pandas as pd
@@ -71,25 +72,33 @@ def main(parser):
         if parser.csv_classes is None:
             raise ValueError('Must provide --csv_classes when training on CSV.')
 
-        dataset_train = CSVDataset(train_file=parser.csv_train, class_list=parser.csv_classes,
-                                   transform=transforms.Compose([Normalizer(), Augmenter(), Resizer()]))
+        if parser.no_normalize:
+            dataset_train = CSVDataset(train_file=parser.csv_train, class_list=parser.csv_classes,
+                                       transform=transforms.Compose([Augmenter(augment=parser.augment), Resizer()]))
+        else:
+            dataset_train = CSVDataset(train_file=parser.csv_train, class_list=parser.csv_classes,
+                                       transform=transforms.Compose([Augmenter(augment=parser.augment), Normalizer(), Resizer()]))
 
         if parser.csv_val is None:
             dataset_val = None
             print('No validation annotations provided.')
         else:
-            dataset_val = CSVDataset(train_file=parser.csv_val, class_list=parser.csv_classes,
-                                     transform=transforms.Compose([Normalizer(), Resizer()]))
-
+            if parser.no_normalize:
+                dataset_val = CSVDataset(train_file=parser.csv_val, class_list=parser.csv_classes,
+                                         transform=transforms.Compose([Augmenter(augment=parser.augment), Resizer()]))
+            else:
+                dataset_val = CSVDataset(train_file=parser.csv_val, class_list=parser.csv_classes,
+                                         transform=transforms.Compose([Augmenter(augment=parser.augment), Normalizer(), Resizer()]))
+    
     else:
         raise ValueError('Dataset type not understood (must be csv or coco), exiting.')
 
     sampler = AspectRatioBasedSampler(dataset_train, batch_size=parser.batch, drop_last=False)
-    dataloader_train = DataLoader(dataset_train, num_workers=8, collate_fn=collater, batch_sampler=sampler, worker_init_fn=worker_init_fn)
+    dataloader_train = DataLoader(dataset_train, num_workers=8, collate_fn=collater, batch_sampler=sampler, worker_init_fn=worker_init_fn, pin_memory=True)
 
     if dataset_val is not None:
         sampler_val = AspectRatioBasedSampler(dataset_val, batch_size=1, drop_last=False)
-        dataloader_val = DataLoader(dataset_val, num_workers=3, collate_fn=collater, batch_sampler=sampler_val, worker_init_fn=val_worker_init_fn)
+        dataloader_val = DataLoader(dataset_val, num_workers=3, collate_fn=collater, batch_sampler=sampler_val, worker_init_fn=val_worker_init_fn, pin_memory=True)
 
     # Create the model
     if parser.depth == 18:
@@ -236,9 +245,19 @@ if __name__ == '__main__':
                         help='Path to log metrics and model states to.')
     parser.add_argument('--pretrained', action='store_true',
                         help='Determines whether to start with randomized or pre-trained weights.')
+    parser.add_argument('--no_normalize', action='store_true',
+                        help='Determine whether to apply ImageNet mean/std normalization (ONLY WITH PRETRAINING).')
+    parser.add_argument('--augment', action='store_true',
+                        help='Determines whether to augment training images.')
     parser.add_argument('--seed', type=int, default=0,
                         help='Random seed for reproducibility.')
 
     parser = parser.parse_args()
+
+    # if not parser.no_normalize and parser.augment:
+    #     sys.exit('Invalid arguments: --augment and --no_normalize are not compatible.')
+
+    if not parser.pretrained:
+        parser.no_normalize = True  # no ImageNet normalization if randomly intializing weights
 
     main(parser)
