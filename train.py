@@ -72,23 +72,15 @@ def main(parser):
         if parser.csv_classes is None:
             raise ValueError('Must provide --csv_classes when training on CSV.')
 
-        if parser.no_normalize:
-            dataset_train = CSVDataset(train_file=parser.csv_train, class_list=parser.csv_classes,
-                                       transform=transforms.Compose([Augmenter(augment=parser.augment), Resizer()]))
-        else:
-            dataset_train = CSVDataset(train_file=parser.csv_train, class_list=parser.csv_classes,
-                                       transform=transforms.Compose([Augmenter(augment=parser.augment), Normalizer(), Resizer()]))
+        dataset_train = CSVDataset(train_file=parser.csv_train, class_list=parser.csv_classes,
+                                   transform=transforms.Compose([Augmenter(augment=parser.augment), Normalizer(no_normalize=parser.no_normalize), Resizer()]))
 
         if parser.csv_val is None:
             dataset_val = None
             print('No validation annotations provided.')
         else:
-            if parser.no_normalize:
-                dataset_val = CSVDataset(train_file=parser.csv_val, class_list=parser.csv_classes,
-                                         transform=transforms.Compose([Augmenter(augment=parser.augment), Resizer()]))
-            else:
-                dataset_val = CSVDataset(train_file=parser.csv_val, class_list=parser.csv_classes,
-                                         transform=transforms.Compose([Augmenter(augment=parser.augment), Normalizer(), Resizer()]))
+            dataset_val = CSVDataset(train_file=parser.csv_val, class_list=parser.csv_classes,
+                                     transform=transforms.Compose([Augmenter(augment=False), Normalizer(no_normalize=parser.no_normalize), Resizer()]))
     
     else:
         raise ValueError('Dataset type not understood (must be csv or coco), exiting.')
@@ -126,7 +118,7 @@ def main(parser):
 
     retinanet.training = True
 
-    optimizer = optim.Adam(retinanet.parameters(), lr=1e-5)
+    optimizer = optim.Adam(retinanet.parameters(), lr=parser.lr)
 
     scheduler = optim.lr_scheduler.ReduceLROnPlateau(optimizer, patience=3, verbose=True)
 
@@ -156,6 +148,31 @@ def main(parser):
 
         pbar = tqdm.tqdm(enumerate(dataloader_train), total=len(dataloader_train), desc=f'Epoch {epoch_num}')
         for iter_num, data in pbar:
+            # if iter_num == 1:
+            #     import matplotlib.pyplot as plt
+            #     from matplotlib.patches import Rectangle
+            #     import sys
+
+            #     images = data['img'].detach().cpu().numpy()
+            #     bboxes = data['annot'].detach().cpu().numpy()
+            #     print(images.shape, bboxes.shape)
+            #     print(bboxes)
+            #     # bboxes = bboxes.round(0).astype(np.int)
+
+            #     for i, (img, bbox) in enumerate(zip(images, bboxes)):
+            #         print(img.min(), img.max())
+            #         fig, ax = plt.subplots(1, 1, figsize=(6, 6))
+            #         ax.imshow(img.transpose((1, 2, 0)), cmap='gray')
+
+            #         for bb in bbox:
+            #             if bb[0] == -1:
+            #                 continue
+            #             ax.add_patch(Rectangle((bb[0], bb[1]), bb[2]-bb[0], bb[3]-bb[1], edgecolor='r', facecolor='none'))
+            #         fig.tight_layout()
+            #         fig.savefig(f'IMG-AUG-{i+1}.png', bbox_inches='tight', dpi=150)
+
+            #     sys.exit()
+
             try:
                 optimizer.zero_grad()
 
@@ -213,7 +230,7 @@ def main(parser):
         current_metrics = pd.DataFrame({'epoch': [epoch_num], 'mAP': [mAP], 'precision': [precision], 'recall': [recall]})
         current_metrics.to_csv(os.path.join(parser.save_dir, 'val_history.csv'), mode='a', header=False, index=False)
 
-        scheduler.step(mAP)
+        scheduler.step(l)
 
         torch.save(retinanet.module, os.path.join(parser.save_dir, 'model_states', f'{parser.dataset}_retinanet_{epoch_num}.pt'))
         print(f'Time for epoch {epoch_num}: {round(time.perf_counter() - epoch_start, 2)} seconds.')
@@ -239,12 +256,14 @@ if __name__ == '__main__':
                         help='Number of epochs to train for.')
     parser.add_argument('--batch', type=int, default=2,
                         help='Batch size for training dataset.')
+    parser.add_argument('--lr', type=float, default=1e-5,
+                        help='Initial learning rate for Adam optimizer.')
     parser.add_argument('--save_dir', type=str, required=True,
                         help='Path to log metrics and model states to.')
     parser.add_argument('--pretrained', action='store_true',
                         help='Determines whether to start with randomized or pre-trained weights.')
     parser.add_argument('--no_normalize', action='store_true',
-                        help='Determine whether to apply ImageNet mean/std normalization (ONLY WITH PRETRAINING).')
+                        help='Determine whether to apply ImageNet mean/std normalization.')
     parser.add_argument('--augment', action='store_true',
                         help='Determines whether to augment training images.')
     parser.add_argument('--seed', type=int, default=0,

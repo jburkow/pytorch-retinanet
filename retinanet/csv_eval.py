@@ -230,23 +230,28 @@ def evaluate(
         average_precision  = _compute_ap(recall, precision)
         average_precisions[label] = average_precision, num_annotations
 
-    print('\nmAP:')
-    for label in range(generator.num_classes()):
-        label_name = generator.label_to_name(label)
-        print(f'\t{label_name}: {average_precisions[label][0]}')
-        print("Precision: ", precision[-1])
-        print("Recall: ", recall[-1])
+    try:
+        print('\nmAP:')
+        for label in range(generator.num_classes()):
+            label_name = generator.label_to_name(label)
+            print(f'\t{label_name}: {average_precisions[label][0]}')
+            print("Precision: ", precision[-1])
+            print("Recall: ", recall[-1])
 
-        mAP, precision, recall = average_precisions[label][0], precision[-1], recall[-1]
+            mAP, precision, recall = average_precisions[label][0], precision[-1], recall[-1]
 
-        if save_path is not None:
-            plt.plot(recall, precision)
-            plt.xlabel('Recall')
-            plt.ylabel('Precision')
-            plt.title(f'Precision Recall Curve - {dataset}')
+            if save_path is not None:
+                plt.plot(recall, precision)
+                plt.xlabel('Recall')
+                plt.ylabel('Precision')
+                plt.title(f'Precision Recall Curve - {dataset}')
 
-            plt.tight_layout()
+                plt.tight_layout()
 
-            plt.savefig(f'{save_path}/{label_name}_{dataset}_precision_recall.png')
+                plt.savefig(f'{save_path}/{label_name}_{dataset}_precision_recall.png')
 
-    return mAP, precision, recall
+        return mAP, precision, recall
+
+    except:
+        print('Some precision/recall/mAP issue')
+        return 0, 0, 0

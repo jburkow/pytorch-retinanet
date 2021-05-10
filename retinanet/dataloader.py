@@ -81,7 +81,8 @@ class CocoDataset(Dataset):
         if len(img.shape) == 2:
             img = skimage.color.gray2rgb(img)
 
-        return ((img - img.min()) / (img.max() - img.min())).astype(np.float32)  # min/max normalize to [0, 1]
+        # return ((img - img.min()) / (img.max() - img.min())).astype(np.float32)  # min/max normalize to [0, 1]
+        return img.astype(np.uint8)
 
     def load_annotations(self, image_index):
         # get ground truth annotations
@@ -383,21 +384,22 @@ class Augmenter(object):
 
         if self.augment:
             self.transform = A.Compose([
-                A.ShiftScaleRotate(shift_limit=0.1, scale_limit=0.5, rotate_limit=10, border_mode=cv2.BORDER_CONSTANT, value=0, p=1),
+                A.ShiftScaleRotate(shift_limit=0.1, scale_limit=0.5, rotate_limit=10, border_mode=cv2.BORDER_CONSTANT, value=0, p=0.5),
                 A.HorizontalFlip(p=0.5),
                 A.RandomBrightness(p=0.5),
-                A.RandomContrast(p=0.5)
-            ], bbox_params=A.BboxParams(format='pascal_voc', label_fields=['category_id']))
+                A.RandomContrast(p=0.5),
+                A.GaussianBlur(p=0.5)
+            ], bbox_params=A.BboxParams(format='pascal_voc', min_visibility=0.3, label_fields=['category_id']))
 
     def __call__(self, sample):
         image, annots = sample['img'], sample['annot']
 
         if self.augment:
-            transformed = self.transform(image=image.astype(np.float32), bboxes=annots[:, :4], category_id=annots[:, 4])
-            transformed['bboxes'] = np.array(transformed['bboxes']).round(0).astype(int)
+            transformed = self.transform(image=image, bboxes=annots[:, :4], category_id=annots[:, 4])
+            transformed['bboxes'] = np.array(transformed['bboxes'])  #.round(0).astype(int)
             transformed['category_id'] = np.array(transformed['category_id'])
 
-            if transformed['bboxes'].shape[0] == 0:  # if bbox removed by aug s.t. none remain, just undo augmentation
+            if transformed['bboxes'].shape[0] == 0:  # if bbox(es) removed by aug s.t. none remain, undo augmentation
                 return sample
             else:
                 return {'img': transformed['image'], 'annot': np.hstack((transformed['bboxes'], transformed['category_id'][:, np.newaxis]))}
@@ -407,15 +409,21 @@ class Augmenter(object):
 
 class Normalizer(object):
 
-    def __init__(self):
+    def __init__(self, no_normalize):
         self.mean = np.array([[[0.485, 0.456, 0.406]]])
         self.std = np.array([[[0.229, 0.224, 0.225]]])
 
-    def __call__(self, sample):
+        self.no_normalize = no_normalize  # whether to do ImageNet normalization
 
+    def __call__(self, sample):
         image, annots = sample['img'], sample['annot']
 
-        return {'img':((image.astype(np.float32)-self.mean)/self.std), 'annot': annots}
+        image = ((image - image.min()) / (image.max() - image.min())).astype(np.float32)
+
+        if not self.no_normalize:
+            return {'img':((image.astype(np.float32)-self.mean)/self.std), 'annot': annots}
+        else:
+            return {'img': image, 'annot': annots}
 
 class UnNormalizer(object):
     def __init__(self, mean=None, std=None):
