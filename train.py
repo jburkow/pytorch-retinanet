@@ -42,16 +42,26 @@ def main(parser):
     print(f'CUDA available: {torch.cuda.is_available()}')
 
     # Create folder to save model states to if it doesn't exist
-    if os.path.exists(parser.save_dir):
-        shutil.rmtree(parser.save_dir)
-    os.mkdir(parser.save_dir)
-    os.mkdir(os.path.join(parser.save_dir, 'model_states'))
+    MODEL_NAME = f'retinanet{parser.depth}'
+    MODEL_NAME += '_pretrained' if parser.pretrained else ''
+    MODEL_NAME += '_no-norm' if parser.no_normalize else ''
+    MODEL_NAME += '_aug' if parser.augment else ''
+    MODEL_NAME += f'_lr-{parser.lr}'
+    MODEL_NAME += f'_bs-{parser.batch}'
+    MODEL_NAME += f'_patience-{parser.lr_patience}-{parser.patience}' if parser.patience != 0 else f'_patience-{parser.lr_patience}'
+    MODEL_NAME += f'_seed-{parser.seed}'
+
+    save_dir = os.path.join(parser.save_dir, MODEL_NAME)
+    if os.path.exists(save_dir):
+        shutil.rmtree(save_dir)
+    os.mkdir(save_dir)
+    os.mkdir(os.path.join(save_dir, 'model_states'))
 
     # Create csv files for logging training metrics
-    train_history = pd.DataFrame({'epoch': [], 'loss': [], 'cls_loss': [], 'bbox_loss': []})
-    val_history   = pd.DataFrame({'epoch': [], 'mAP': [], 'precision': [], 'recall': []})
-    train_history.to_csv(os.path.join(parser.save_dir, 'train_history.csv'), index=False)
-    val_history.to_csv(os.path.join(parser.save_dir, 'val_history.csv'), index=False)
+    train_history = pd.DataFrame({'epoch': [], 'loss': [], 'cls_loss': [], 'bbox_loss': [], 'time': []})
+    val_history   = pd.DataFrame({'epoch': [], 'val_metric': [], 'mAP': [], 'max_F1': [], 'max_F1_pr': [], 'max_F1_re': [], 'max_F2': [], 'max_F_pr': [], 'max_F2_re': []})
+    train_history.to_csv(os.path.join(save_dir, 'train_history.csv'), index=False)
+    val_history.to_csv(os.path.join(save_dir, 'val_history.csv'), index=False)
 
     # Create the data loaders
     if parser.dataset == 'coco':
@@ -120,9 +130,9 @@ def main(parser):
 
     optimizer = optim.Adam(retinanet.parameters(), lr=parser.lr)
 
-    scheduler = optim.lr_scheduler.ReduceLROnPlateau(optimizer, patience=3, verbose=True)
+    scheduler = optim.lr_scheduler.ReduceLROnPlateau(optimizer, patience=parser.lr_patience, mode='max', verbose=True)
 
-    loss_hist = collections.deque(maxlen=500)
+    # loss_hist = collections.deque(maxlen=500)
 
     retinanet.train()
     retinanet.module.freeze_bn()
@@ -136,6 +146,8 @@ def main(parser):
     print(f'Backbone: ResNet{parser.depth}')
     print()
 
+    best_epoch = 0
+    best_val_metric = 0.
     for epoch_num in range(1, parser.epochs+1):
         epoch_start = time.perf_counter()
 
@@ -212,7 +224,7 @@ def main(parser):
 
         # Save metrics to csv
         current_metrics = pd.DataFrame({'epoch': [epoch_num], 'loss': [l], 'cls_loss': [cls_l], 'bbox_loss': [box_l], 'time': [t]})
-        current_metrics.to_csv(os.path.join(parser.save_dir, 'train_history.csv'), mode='a', header=False, index=False)
+        current_metrics.to_csv(os.path.join(save_dir, 'train_history.csv'), mode='a', header=False, index=False)
 
         if parser.dataset == 'coco':
 
@@ -222,22 +234,47 @@ def main(parser):
 
         elif parser.dataset == 'csv' and parser.csv_val is not None:
 
-            print('Evaluating validation dataset')
+            # print('Evaluating validation dataset')
+            print(f'\n{"-"*10} EPOCH {epoch_num} VALIDATION {"-"*10}')
 
-            mAP, precision, recall = csv_eval.evaluate(dataset_val, retinanet, save_path=parser.save_dir)
+            mAP, max_F1, max_F1_pr, max_F1_re, max_F2, max_F2_pr, max_F2_re = csv_eval.evaluate(dataset_val, retinanet, save_path=save_dir)
+
+        val_metric = (mAP+max_F2)/2
+
+        if parser.patience != 0:
+            if val_metric > best_val_metric:
+                print(f'\nEARLY STOPPING: Validation metric has improved from {best_val_metric} to {val_metric}.\n')
+                best_val_metric = val_metric
+                best_epoch = epoch_num
+
+                torch.save(retinanet.module, os.path.join(save_dir, 'model_states', f'{parser.dataset}_retinanet_{epoch_num}.pt'))
+            else:
+                print(f'\nEARLY STOPPING: Validation metric has not improved from {best_val_metric} (for {epoch_num-best_epoch} epochs).\n')
+        else:
+            if val_metric > best_val_metric:
+                print(f'\nValidation metric has improved from {best_val_metric} to {val_metric}.\n')
+            else:
+                print(f'\nValidation metric has not improved from {best_val_metric} (for {epoch_num-best_epoch} epochs).\n')
+
+            torch.save(retinanet.module, os.path.join(save_dir, 'model_states', f'{parser.dataset}_retinanet_{epoch_num}.pt'))
+
+        print(f'Time for epoch {epoch_num}: {round(time.perf_counter() - epoch_start, 2)} seconds.')
+        print(f'{"-"*10} END EPOCH {epoch_num} VALIDATION {"-"*10}\n')
 
         # Save val metrics to csv
-        current_metrics = pd.DataFrame({'epoch': [epoch_num], 'mAP': [mAP], 'precision': [precision], 'recall': [recall]})
-        current_metrics.to_csv(os.path.join(parser.save_dir, 'val_history.csv'), mode='a', header=False, index=False)
+        current_metrics = pd.DataFrame({'epoch': [epoch_num], 'val_metric': [val_metric], 'mAP': [mAP], 'max_F1': [max_F1], 'max_F1_pr': [max_F1_pr],
+                                        'max_F1_re': [max_F1_re], 'max_F2': [max_F2], 'max_F_pr': [max_F2_pr], 'max_F2_re': [max_F2_re]})
+        current_metrics.to_csv(os.path.join(save_dir, 'val_history.csv'), mode='a', header=False, index=False)
 
-        scheduler.step(l)
+        scheduler.step(val_metric)
 
-        torch.save(retinanet.module, os.path.join(parser.save_dir, 'model_states', f'{parser.dataset}_retinanet_{epoch_num}.pt'))
-        print(f'Time for epoch {epoch_num}: {round(time.perf_counter() - epoch_start, 2)} seconds.')
+        if epoch_num - best_epoch > parser.patience > 0:
+            print(f'TERMINATING TRAINING AT EPOCH {epoch_num}. BEST VALIDATION METRIC WAS {best_val_metric}.')
+            break
 
     retinanet.eval()
 
-    torch.save(retinanet, os.path.join(parser.save_dir, 'model_final.pt'))
+    torch.save(retinanet, os.path.join(save_dir, 'model_final.pt'))
 
 
 if __name__ == '__main__':
@@ -258,7 +295,7 @@ if __name__ == '__main__':
                         help='Batch size for training dataset.')
     parser.add_argument('--lr', type=float, default=1e-5,
                         help='Initial learning rate for Adam optimizer.')
-    parser.add_argument('--save_dir', type=str, required=True,
+    parser.add_argument('--save_dir', type=str, default='/mnt/research/midi_lab/burkowjo_data/model_training_and_eval/pytorch-retinanet/',
                         help='Path to log metrics and model states to.')
     parser.add_argument('--pretrained', action='store_true',
                         help='Determines whether to start with randomized or pre-trained weights.')
@@ -268,6 +305,10 @@ if __name__ == '__main__':
                         help='Determines whether to augment training images.')
     parser.add_argument('--seed', type=int, default=0,
                         help='Random seed for reproducibility.')
+    parser.add_argument('--patience', type=int, default=20,
+                        help='Number of epochs of no improvement in validation metric before stopping training early.')
+    parser.add_argument('--lr_patience', type=int, default=4,
+                        help='Number of epochs of no improvement in validation metric before decreasing learning rate tenfold.')
 
     parser = parser.parse_args()
 

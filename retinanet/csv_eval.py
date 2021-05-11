@@ -3,7 +3,7 @@ from __future__ import print_function
 import numpy as np
 import matplotlib.pyplot as plt
 import torch
-
+import tqdm
 
 def compute_overlap(a, b):
     """
@@ -77,8 +77,8 @@ def _get_detections(dataset, retinanet, score_threshold=0.05, max_detections=100
 
     with torch.no_grad():
 
-        print('\nGetting detections:')
-        for index in range(len(dataset)):
+        pbar = tqdm.tqdm(range(len(dataset)), desc='Getting detections')
+        for index in pbar:
             data = dataset[index]
             scale = data['scale']
 
@@ -117,9 +117,6 @@ def _get_detections(dataset, retinanet, score_threshold=0.05, max_detections=100
                 for label in range(dataset.num_classes()):
                     all_detections[index][label] = np.zeros((0, 5))
 
-            print('{}/{}'.format(index + 1, len(dataset)), end='\r')
-        print('')
-
     return all_detections
 
 
@@ -134,17 +131,14 @@ def _get_annotations(generator):
     """
     all_annotations = [[None for i in range(generator.num_classes())] for j in range(len(generator))]
 
-    print('\nGetting annotations:')
-    for i in range(len(generator)):
+    pbar = tqdm.tqdm(range(len(generator)), desc='Getting annotations')
+    for i in pbar:
         # load the annotations
         annotations = generator.load_annotations(i)
 
         # copy detections to all_annotations
         for label in range(generator.num_classes()):
             all_annotations[i][label] = annotations[annotations[:, 4] == label, :4].copy()
-
-        print('{}/{}'.format(i + 1, len(generator)), end='\r')
-    print('')
 
     return all_annotations
 
@@ -170,7 +164,6 @@ def evaluate(
         A dict mapping class names to mAP scores.
     """
     # gather all detections and annotations
-
     all_detections     = _get_detections(generator, retinanet, score_threshold=score_threshold, max_detections=max_detections)
     all_annotations    = _get_annotations(generator)
 
@@ -231,27 +224,21 @@ def evaluate(
         average_precisions[label] = average_precision, num_annotations
 
     try:
-        print('\nmAP:')
-        for label in range(generator.num_classes()):
-            label_name = generator.label_to_name(label)
-            print(f'\t{label_name}: {average_precisions[label][0]}')
-            print("Precision: ", precision[-1])
-            print("Recall: ", recall[-1])
+        mAP = average_precisions[0][0]
+        print('mAP:', mAP)
 
-            mAP, precision, recall = average_precisions[label][0], precision[-1], recall[-1]
+        F1s = 2*(precision*recall)/np.maximum(precision+recall, np.finfo(np.float64).eps)
+        idx = np.nanargmax(F1s)
+        max_F1, max_F1_pr, max_F1_re = F1s[idx], precision[idx], recall[idx]
+        print('F1: ', max_F1, 'Precision:', max_F1_pr, 'Recall:', max_F1_re)
 
-            if save_path is not None:
-                plt.plot(recall, precision)
-                plt.xlabel('Recall')
-                plt.ylabel('Precision')
-                plt.title(f'Precision Recall Curve - {dataset}')
+        F2s = (1+2**2)*(precision*recall)/np.maximum(2**2*precision+recall, np.finfo(np.float64).eps)
+        idx = np.nanargmax(F2s)
+        max_F2, max_F2_pr, max_F2_re = F2s[idx], precision[idx], recall[idx]
+        print('F2: ', max_F2, 'Precision:', max_F2_pr, 'Recall:', max_F2_re)
 
-                plt.tight_layout()
 
-                plt.savefig(f'{save_path}/{label_name}_{dataset}_precision_recall.png')
-
-        return mAP, precision, recall
-
+        return mAP, max_F1, max_F1_pr, max_F1_re, max_F2, max_F2_pr, max_F2_re
     except:
-        print('Some precision/recall/mAP issue')
-        return 0, 0, 0
+        print('Some precision/recall/AP issue')
+        return 0, 0, 0, 0, 0, 0, 0
