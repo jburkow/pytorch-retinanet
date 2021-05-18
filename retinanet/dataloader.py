@@ -81,8 +81,7 @@ class CocoDataset(Dataset):
         if len(img.shape) == 2:
             img = skimage.color.gray2rgb(img)
 
-        # return ((img - img.min()) / (img.max() - img.min())).astype(np.float32)  # min/max normalize to [0, 1]
-        return img.astype(np.uint8)
+        return img.astype(np.float32)/255.0
 
     def load_annotations(self, image_index):
         # get ground truth annotations
@@ -219,7 +218,7 @@ class CSVDataset(Dataset):
         if len(img.shape) == 2:
             img = skimage.color.gray2rgb(img)
 
-        return img.astype(np.float32)/255.0
+        return img.astype(np.uint8)
 
     def load_annotations(self, image_index):
         # get ground truth annotations
@@ -389,7 +388,7 @@ class Augmenter(object):
                 A.RandomBrightness(p=0.5),
                 A.RandomContrast(p=0.5),
                 A.GaussianBlur(p=0.5)
-            ], bbox_params=A.BboxParams(format='pascal_voc', min_visibility=0.3, label_fields=['category_id']))
+            ], bbox_params=A.BboxParams(format='pascal_voc', min_visibility=0.2, label_fields=['category_id']))
 
     def __call__(self, sample):
         image, annots = sample['img'], sample['annot']
