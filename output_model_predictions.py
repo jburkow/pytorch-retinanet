@@ -109,6 +109,8 @@ def main(parse_args):
     ### EVALUATE/DETECT ON IMAGES
     # Loop through all images and save detection boxes along with scores
     prediction_dict = pd.DataFrame(columns=['Patient', 'height', 'width', 'x1', 'y1', 'x2', 'y2', 'score'])
+                                            # dtype={'x1': pd.Int64Dtype(), 'y1': pd.Int64Dtype(), 'x2': pd.Int64Dtype(), 'y2': pd.Int64Dtype()})
+    print(f'{len(dataset)} unique images in annotation file.')
     print(f'Beginning fracture detection on the dataset with model "{parse_args.model_path.split("/")[-1]}":')
 
     pbar = tqdm(iterable=enumerate(dataset), total=len(dataset), desc='Evaluating dataset')
@@ -132,23 +134,38 @@ def main(parse_args):
             # Process image
             scores, _, boxes = model(image.float())
 
+        # If model has no predictions, add a row with empty values
+        if boxes.nelement() == 0:
+            prediction_dict = prediction_dict.append({'Patient' : file,
+                                                        'height' : im_shape[0],
+                                                        'width' : im_shape[1],
+                                                        'x1' : pd.NA,
+                                                        'y1' : pd.NA,
+                                                        'x2' : pd.NA,
+                                                        'y2' : pd.NA,
+                                                        'score' : pd.NA},
+                                                        ignore_index=True)
+        else:
             # Correct for image scale
             boxes /= scale
 
-        for box, score in zip(boxes, scores):
-            prediction_dict = prediction_dict.append({'Patient' : file,
-                                                      'height' : im_shape[0],
-                                                      'width' : im_shape[1],
-                                                      'x1' : int(floor(box[0].item())),
-                                                      'y1' : int(floor(box[1].item())),
-                                                      'x2' : int(ceil(box[2].item())),
-                                                      'y2' : int(ceil(box[3].item())),
-                                                      'score' : score.item()},
-                                                      ignore_index=True)
+            for box, score in zip(boxes, scores):
+                prediction_dict = prediction_dict.append({'Patient' : file,
+                                                        'height' : im_shape[0],
+                                                        'width' : im_shape[1],
+                                                        'x1' : int(floor(box[0].item())),
+                                                        'y1' : int(floor(box[1].item())),
+                                                        'x2' : int(ceil(box[2].item())),
+                                                        'y2' : int(ceil(box[3].item())),
+                                                        'score' : score.item()},
+                                                        ignore_index=True)
+
+    print(f'{len(prediction_dict.Patient.unique())} unique images in model predictions.')
 
     # Output prediction_dict to CSV
-    print('Writing to file...')
-    prediction_dict.to_csv(os.path.join(parse_args.save_dir, parse_args.filename), header=False, index=False)
+    if not parse_args.no_save:
+        print('Writing to file...')
+        prediction_dict.to_csv(os.path.join(parse_args.save_dir, parse_args.filename), header=False, index=False)
 
 
 if __name__ == '__main__':
@@ -165,6 +182,9 @@ if __name__ == '__main__':
 
     parser.add_argument('--filename', default='retinanet_model_predictions.csv',
                         help='Filename to save the prediction output CSV as.')
+
+    parser.add_argument('--no_save', action='store_true',
+                        help='Use not to save CSV output; for debugging.')
 
     parser_args = parser.parse_args()
 
