@@ -4,10 +4,10 @@ import collections
 import random
 import time
 import sys
+import shutil
 
 import numpy as np
 import pandas as pd
-import shutil
 import tqdm
 
 import torch
@@ -39,11 +39,16 @@ def main(parser):
     torch.backends.cudnn.benchmark = False
     torch.backends.cudnn.deterministic = True
 
+    # Set current day string
+    timestr = time.strftime("%Y%m%d")
+
     print(f'CUDA available: {torch.cuda.is_available()}')
 
     # Create folder to save model states to if it doesn't exist
-    MODEL_NAME = f'retinanet{parser.depth}'
+    MODEL_NAME = f'{timestr}'
+    MODEL_NAME += f'_resnet{parser.depth}'
     MODEL_NAME += '_pretrained' if parser.pretrained else ''
+    MODEL_NAME += f'_{parser.epochs}epoch'
     MODEL_NAME += '_no-norm' if parser.no_normalize else ''
     MODEL_NAME += '_aug' if parser.augment else ''
     MODEL_NAME += f'_lr-{parser.lr}'
