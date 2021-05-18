@@ -274,8 +274,10 @@ class ResNet(nn.Module):
                 scores = torch.squeeze(classification[:, :, i])
                 scores_over_thresh = (scores > 0.05)
                 if scores_over_thresh.sum() == 0:
+                    # return empty tensors to count toward true negatives
+                    return torch.Tensor(), torch.Tensor(), torch.Tensor()
                     # no boxes to NMS, just continue
-                    continue
+                    # continue
 
                 scores = scores[scores_over_thresh]
                 anchorBoxes = torch.squeeze(transformed_anchors)
