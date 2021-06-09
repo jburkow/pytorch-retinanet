@@ -5,9 +5,11 @@ import torch
 import numpy as np
 import random
 import csv
+from copy import deepcopy
 
 import albumentations as A
 import cv2
+import pandas as pd
 
 from torch.utils.data import Dataset, DataLoader
 from torchvision import transforms, utils
@@ -129,7 +131,7 @@ class CocoDataset(Dataset):
 class CSVDataset(Dataset):
     """CSV dataset."""
 
-    def __init__(self, train_file, class_list, transform=None):
+    def __init__(self, train_file, class_list, metadata_file='', transform=None):
         """
         Args:
             train_file (string): CSV file with training annotations
@@ -138,6 +140,7 @@ class CSVDataset(Dataset):
         """
         self.train_file = train_file
         self.class_list = class_list
+        self.metadata_file = metadata_file
         self.transform = transform
 
         # parse the provided class file
@@ -158,6 +161,50 @@ class CSVDataset(Dataset):
         except ValueError as e:
             raise(ValueError('invalid CSV annotations file: {}: {}'.format(self.train_file, e)))
         self.image_names = list(self.image_data.keys())
+
+        # Read and prepare metadata csv
+        if self.metadata_file != '':
+            self.orig_metadata_df = pd.read_csv(self.metadata_file)
+
+            self.metadata_df = self._prepare_metadata(self.orig_metadata_df)
+
+    def _prepare_metadata(self, metadata_df):
+        # Deep copy metadata df
+        processed_df = deepcopy(metadata_df)
+
+        # Subset metadata df for images in current set (determined by self.image_names)
+        patient_ids = [s.split('/')[-1].split('.')[0] for s in self.image_names]
+
+        processed_df['tmp_id'] = [s.split('/')[-1].split('.')[0][:-2] for s in processed_df['patient_id']]
+        processed_df = processed_df[processed_df['tmp_id'].isin(patient_ids)]
+
+        # Sort metadata df
+        processed_df = processed_df.sort_values(by=['patient_id'])
+        processed_df['patient_id'] = sorted(self.image_names)
+
+        # Clean vendor names (e.g., reduce "CANON", "CANON INC.", and "Canon" to simply "Canon")
+        vendor_list = ['Canon', 'Philips', 'Fujifilm']
+        # vendor_list = ['Canon', 'Philips', 'Fujifilm', 'Swissray', 'GE', 'Kodak']
+        for vendor in vendor_list:
+            processed_df['vendor'] = processed_df['vendor'].apply(lambda x: vendor if vendor.upper() in x or vendor in x else x)    
+
+        # Create "Other" vendor group for simplicity
+        processed_df['vendor'] = processed_df['vendor'].apply(lambda x: 'Other' if x not in vendor_list else x)
+
+        # Impute age with median training set age (computed elsewhere)
+        processed_df['age_days'] = processed_df['age_days'].fillna(112.0)
+
+        # Standardize age with mean and std training set age (computed elsewhere)
+        processed_df['age_days'] = (processed_df['age_days'] - 201.145) / 580.376
+
+        # Extract image path, age (days), sex, and scanner dummy variables -- 5 non-image features total
+        out_df = processed_df[['patient_id', 'age_days', 'male']]
+        out_df = out_df.join(pd.get_dummies(processed_df['vendor']).astype(np.float32))
+
+        # Reset index to 0-number of images
+        out_df.index = list(range(out_df.shape[0]))
+
+        return out_df
 
     def _parse(self, value, function, fmt):
         """
@@ -206,11 +253,22 @@ class CSVDataset(Dataset):
 
         img = self.load_image(idx)
         annot = self.load_annotations(idx)
-        sample = {'img': img, 'annot': annot}
+
+        if self.metadata_file != '':
+            metadata = self.load_metadata(idx)
+            sample = {'img': img, 'annot': annot, 'metadata': metadata}
+        else:
+            sample = {'img': img, 'annot': annot}
+
         if self.transform:
             sample = self.transform(sample)
 
         return sample
+
+    def load_metadata(self, image_index):
+        metadata = self.metadata_df.loc[self.metadata_df['patient_id'] == self.image_names[image_index], ['age_days', 'male', 'Canon', 'Philips', 'Fujifilm']]
+
+        return metadata.values.squeeze()
 
     def load_image(self, image_index):
         img = skimage.io.imread(self.image_names[image_index])
@@ -302,9 +360,13 @@ class CSVDataset(Dataset):
 
 
 def collater(data):
+    metadata = False
 
     imgs = [s['img'] for s in data]
     annots = [s['annot'] for s in data]
+    if 'metadata' in data[0]:
+        metadata = True
+        metadatas = [s['metadata'] for s in data]
     scales = [s['scale'] for s in data]
         
     widths = [int(s.shape[0]) for s in imgs]
@@ -337,13 +399,21 @@ def collater(data):
 
     padded_imgs = padded_imgs.permute(0, 3, 1, 2)
 
-    return {'img': padded_imgs, 'annot': annot_padded, 'scale': scales}
+    if metadata:
+        return {'img': padded_imgs, 'annot': annot_padded, 'metadata': torch.stack(metadatas), 'scale': scales}
+    else:
+        return {'img': padded_imgs, 'annot': annot_padded, 'scale': scales}
 
 class Resizer(object):
     """Convert ndarrays in sample to Tensors."""
 
+    def __init__(self, metadata=False):
+        self.metadata = metadata
+
     def __call__(self, sample, min_side=608, max_side=1024):
         image, annots = sample['img'], sample['annot']
+        if self.metadata:
+            metadata = sample['metadata']
 
         rows, cols, cns = image.shape
 
@@ -371,13 +441,17 @@ class Resizer(object):
 
         annots[:, :4] *= scale
 
-        return {'img': torch.from_numpy(new_image), 'annot': torch.from_numpy(annots), 'scale': scale}
+        if self.metadata:
+            return {'img': torch.from_numpy(new_image), 'annot': torch.from_numpy(annots), 'metadata': torch.from_numpy(metadata), 'scale': scale}
+        else:
+            return {'img': torch.from_numpy(new_image), 'annot': torch.from_numpy(annots), 'scale': scale}
 
 
 class Augmenter(object):
     """Convert ndarrays in sample to Tensors."""
 
-    def __init__(self, augment=True, transform=None):
+    def __init__(self, metadata=False, augment=True, transform=None):
+        self.metadata = metadata
         self.augment = augment
         self.transform = transform
 
@@ -392,6 +466,8 @@ class Augmenter(object):
 
     def __call__(self, sample):
         image, annots = sample['img'], sample['annot']
+        if self.metadata:
+            metadata = sample['metadata']
 
         if self.augment:
             transformed = self.transform(image=image, bboxes=annots[:, :4], category_id=annots[:, 4])
@@ -401,28 +477,40 @@ class Augmenter(object):
             if transformed['bboxes'].shape[0] == 0:  # if bbox(es) removed by aug s.t. none remain, undo augmentation
                 return sample
             else:
-                return {'img': transformed['image'], 'annot': np.hstack((transformed['bboxes'], transformed['category_id'][:, np.newaxis]))}
+                if self.metadata:
+                    return {'img': transformed['image'], 'annot': np.hstack((transformed['bboxes'], transformed['category_id'][:, np.newaxis])), 'metadata': metadata}    
+                else:
+                    return {'img': transformed['image'], 'annot': np.hstack((transformed['bboxes'], transformed['category_id'][:, np.newaxis]))}
         else:
             return sample
 
 
 class Normalizer(object):
 
-    def __init__(self, no_normalize):
+    def __init__(self, no_normalize, metadata=False):
         self.mean = np.array([[[0.485, 0.456, 0.406]]])
         self.std = np.array([[[0.229, 0.224, 0.225]]])
 
         self.no_normalize = no_normalize  # whether to do ImageNet normalization
+        self.metadata = metadata
 
     def __call__(self, sample):
         image, annots = sample['img'], sample['annot']
+        if self.metadata:
+            metadata = sample['metadata']
 
         image = ((image - image.min()) / (image.max() - image.min())).astype(np.float32)
 
         if not self.no_normalize:
-            return {'img':((image.astype(np.float32)-self.mean)/self.std), 'annot': annots}
+            if self.metadata:
+                return {'img':((image.astype(np.float32)-self.mean)/self.std), 'annot': annots, 'metadata': metadata}
+            else:
+                return {'img':((image.astype(np.float32)-self.mean)/self.std), 'annot': annots}
         else:
-            return {'img': image, 'annot': annots}
+            if self.metadata:
+                return {'img': image, 'annot': annots, 'metadata': metadata}
+            else:
+                return {'img': image, 'annot': annots}
 
 class UnNormalizer(object):
     def __init__(self, mean=None, std=None):

@@ -46,7 +46,7 @@ def main(parser):
 
     # Create folder to save model states to if it doesn't exist
     MODEL_NAME = f'{timestr}'
-    MODEL_NAME += f'_resnet{parser.depth}'
+    MODEL_NAME += f'_FiLM-resnet{parser.depth}' if parser.metadata_path != '' else f'_resnet{parser.depth}'
     MODEL_NAME += '_pretrained' if parser.pretrained else ''
     MODEL_NAME += f'_{parser.epochs}epoch'
     MODEL_NAME += '_no-norm' if parser.no_normalize else ''
@@ -87,15 +87,25 @@ def main(parser):
         if parser.csv_classes is None:
             raise ValueError('Must provide --csv_classes when training on CSV.')
 
-        dataset_train = CSVDataset(train_file=parser.csv_train, class_list=parser.csv_classes,
-                                   transform=transforms.Compose([Augmenter(augment=parser.augment), Normalizer(no_normalize=parser.no_normalize), Resizer()]))
+        dataset_train = CSVDataset(train_file=parser.csv_train, class_list=parser.csv_classes, metadata_file=parser.metadata_path,
+                                   transform=transforms.Compose([
+                                       Augmenter(augment=parser.augment, metadata_file=parser.metadata_path),
+                                       Normalizer(no_normalize=parser.no_normalize, metadata_file=parser.metadata_path),
+                                       Resizer(metadata_file=parser.metadata_path)
+                                   ])
+                                  )
 
         if parser.csv_val is None:
             dataset_val = None
             print('No validation annotations provided.')
         else:
-            dataset_val = CSVDataset(train_file=parser.csv_val, class_list=parser.csv_classes,
-                                     transform=transforms.Compose([Augmenter(augment=False), Normalizer(no_normalize=parser.no_normalize), Resizer()]))
+            dataset_val = CSVDataset(train_file=parser.csv_val, class_list=parser.csv_classes, metadata_file=parser.metadata_path,
+                                     transform=transforms.Compose([
+                                       Augmenter(augment=parser.augment, metadata_file=parser.metadata_path),
+                                       Normalizer(no_normalize=parser.no_normalize, metadata_file=parser.metadata_path),
+                                       Resizer(metadata_file=parser.metadata_path)
+                                     ])
+                                    )
     
     else:
         raise ValueError('Dataset type not understood (must be csv or coco), exiting.')
@@ -109,15 +119,15 @@ def main(parser):
 
     # Create the model
     if parser.depth == 18:
-        retinanet = model.resnet18(num_classes=dataset_train.num_classes(), pretrained=parser.pretrained)
+        retinanet = model.resnet18(num_classes=dataset_train.num_classes(), pretrained=parser.pretrained, FiLMed=parser.metadata_path != '')
     elif parser.depth == 34:
-        retinanet = model.resnet34(num_classes=dataset_train.num_classes(), pretrained=parser.pretrained)
+        retinanet = model.resnet34(num_classes=dataset_train.num_classes(), pretrained=parser.pretrained, FiLMed=parser.metadata_path != '')
     elif parser.depth == 50:
-        retinanet = model.resnet50(num_classes=dataset_train.num_classes(), pretrained=parser.pretrained)
+        retinanet = model.resnet50(num_classes=dataset_train.num_classes(), pretrained=parser.pretrained, FiLMed=parser.metadata_path != '')
     elif parser.depth == 101:
-        retinanet = model.resnet101(num_classes=dataset_train.num_classes(), pretrained=parser.pretrained)
+        retinanet = model.resnet101(num_classes=dataset_train.num_classes(), pretrained=parser.pretrained, FiLMed=parser.metadata_path != '')
     elif parser.depth == 152:
-        retinanet = model.resnet152(num_classes=dataset_train.num_classes(), pretrained=parser.pretrained)
+        retinanet = model.resnet152(num_classes=dataset_train.num_classes(), pretrained=parser.pretrained, FiLMed=parser.metadata_path != '')
     else:
         raise ValueError('Unsupported model depth, must be one of 18, 34, 50, 101, 152')
 
@@ -137,8 +147,6 @@ def main(parser):
 
     scheduler = optim.lr_scheduler.ReduceLROnPlateau(optimizer, patience=parser.lr_patience, mode='max', verbose=True)
 
-    # loss_hist = collections.deque(maxlen=500)
-
     retinanet.train()
     retinanet.module.freeze_bn()
 
@@ -149,6 +157,8 @@ def main(parser):
     print(f'Epochs: {parser.epochs}')
     print(f'Batch size: {parser.batch}')
     print(f'Backbone: ResNet{parser.depth}')
+    if parser.metadata_path != '':
+        print(f'Using FiLMed RetinaNet')
     print()
 
     best_epoch = 0
@@ -165,7 +175,7 @@ def main(parser):
 
         pbar = tqdm.tqdm(enumerate(dataloader_train), total=len(dataloader_train), desc=f'Epoch {epoch_num}')
         for iter_num, data in pbar:
-            # if iter_num == 1:
+            # if iter_num == 0:
             #     import matplotlib.pyplot as plt
             #     from matplotlib.patches import Rectangle
             #     import sys
@@ -186,7 +196,7 @@ def main(parser):
             #                 continue
             #             ax.add_patch(Rectangle((bb[0], bb[1]), bb[2]-bb[0], bb[3]-bb[1], edgecolor='r', facecolor='none'))
             #         fig.tight_layout()
-            #         fig.savefig(f'IMG-AUG-{i+1}.png', bbox_inches='tight', dpi=150)
+            #         fig.savefig(f'IMG-AUG-{i+1}.png' if parser.augment else f'IMG-{i+1}.png', bbox_inches='tight', dpi=150)
 
             #     sys.exit()
 
@@ -291,6 +301,8 @@ if __name__ == '__main__':
     parser.add_argument('--csv_train', help='Path to file containing training annotations (see readme)')
     parser.add_argument('--csv_classes', help='Path to file containing class list (see readme)')
     parser.add_argument('--csv_val', help='Path to file containing validation annotations (optional, see readme)')
+
+    parser.add_argument('--metadata_path', type=str, default='', help='Path to metadata csv file')
 
     parser.add_argument('--depth', type=int, default=50,
                         help='Resnet depth, must be one of 18, 34, 50, 101, 152.')
