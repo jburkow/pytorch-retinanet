@@ -59,7 +59,7 @@ def _compute_ap(recall, precision):
     return ap
 
 
-def _get_detections(dataset, retinanet, score_threshold=0.05, max_detections=100):
+def _get_detections(dataset, retinanet, score_threshold=0.05, max_detections=100, metadata=False):
     """ Get the detections from the retinanet using the generator.
     The result is a list of lists such that the size is:
         all_detections[num_images][num_classes] = detections[num_detections, 4 + num_classes]
@@ -83,10 +83,16 @@ def _get_detections(dataset, retinanet, score_threshold=0.05, max_detections=100
             scale = data['scale']
 
             # run network
-            if torch.cuda.is_available():
-                scores, labels, boxes = retinanet(data['img'].permute(2, 0, 1).cuda().float().unsqueeze(dim=0))
+            if metadata:
+                if torch.cuda.is_available():
+                    scores, labels, boxes = retinanet([data['img'].permute(2, 0, 1).cuda().float().unsqueeze(dim=0), data['metadata'].cuda().float().unsqueeze(dim=0)])
+                else:
+                    scores, labels, boxes = retinanet([data['img'].permute(2, 0, 1).float().unsqueeze(dim=0), data['metadata'].cuda().float().unsqueeze(dim=0)])
             else:
-                scores, labels, boxes = retinanet(data['img'].permute(2, 0, 1).float().unsqueeze(dim=0))
+                if torch.cuda.is_available():
+                    scores, labels, boxes = retinanet(data['img'].permute(2, 0, 1).cuda().float().unsqueeze(dim=0))
+                else:
+                    scores, labels, boxes = retinanet(data['img'].permute(2, 0, 1).float().unsqueeze(dim=0))
             scores = scores.cpu().numpy()
             labels = labels.cpu().numpy()
             boxes  = boxes.cpu().numpy()
@@ -150,6 +156,7 @@ def evaluate(
     iou_threshold=0.5,
     score_threshold=0.05,
     max_detections=100,
+    metadata=False,
     save_path=None
 ):
     """ Evaluate a given dataset using a given retinanet.
@@ -164,7 +171,7 @@ def evaluate(
         A dict mapping class names to mAP scores.
     """
     # gather all detections and annotations
-    all_detections     = _get_detections(generator, retinanet, score_threshold=score_threshold, max_detections=max_detections)
+    all_detections     = _get_detections(generator, retinanet, score_threshold=score_threshold, max_detections=max_detections, metadata=metadata)
     all_annotations    = _get_annotations(generator)
 
     average_precisions = {}
