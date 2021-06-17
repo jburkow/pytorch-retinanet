@@ -89,9 +89,9 @@ def main(parser):
 
         dataset_train = CSVDataset(train_file=parser.csv_train, class_list=parser.csv_classes, metadata_file=parser.metadata_path,
                                    transform=transforms.Compose([
-                                       Augmenter(augment=parser.augment, metadata_file=parser.metadata_path),
-                                       Normalizer(no_normalize=parser.no_normalize, metadata_file=parser.metadata_path),
-                                       Resizer(metadata_file=parser.metadata_path)
+                                       Augmenter(augment=parser.augment, metadata=parser.metadata_path != ''),
+                                       Normalizer(no_normalize=parser.no_normalize, metadata=parser.metadata_path != ''),
+                                       Resizer(metadata=parser.metadata_path != '')
                                    ])
                                   )
 
@@ -101,9 +101,9 @@ def main(parser):
         else:
             dataset_val = CSVDataset(train_file=parser.csv_val, class_list=parser.csv_classes, metadata_file=parser.metadata_path,
                                      transform=transforms.Compose([
-                                       Augmenter(augment=parser.augment, metadata_file=parser.metadata_path),
-                                       Normalizer(no_normalize=parser.no_normalize, metadata_file=parser.metadata_path),
-                                       Resizer(metadata_file=parser.metadata_path)
+                                        Augmenter(augment=False, metadata=parser.metadata_path != ''),
+                                        Normalizer(no_normalize=parser.no_normalize, metadata=parser.metadata_path != ''),
+                                        Resizer(metadata=parser.metadata_path != '')
                                      ])
                                     )
     
@@ -160,6 +160,9 @@ def main(parser):
     if parser.metadata_path != '':
         print(f'Using FiLMed RetinaNet')
     print()
+
+    print(retinanet)
+    # sys.exit()
 
     best_epoch = 0
     best_val_metric = 0.
