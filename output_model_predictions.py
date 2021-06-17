@@ -53,11 +53,9 @@ def main(parse_args):
 
     # Create prediction data frame (with image height and width if using "old" format)
     if parse_args.old:
-        prediction_dict = pd.DataFrame(columns=['Patient', 'x1', 'y1', 'x2', 'y2', 'score'],
-                                       dtype={'x1': pd.Int64Dtype(), 'y1': pd.Int64Dtype(), 'x2': pd.Int64Dtype(), 'y2': pd.Int64Dtype()})
+        prediction_dict = pd.DataFrame(columns=['Patient', 'x1', 'y1', 'x2', 'y2', 'score'])
     else:
-        prediction_dict = pd.DataFrame(columns=['Patient', 'height', 'width', 'x1', 'y1', 'x2', 'y2', 'score'],
-                                       dtype={'x1': pd.Int64Dtype(), 'y1': pd.Int64Dtype(), 'x2': pd.Int64Dtype(), 'y2': pd.Int64Dtype()})
+        prediction_dict = pd.DataFrame(columns=['Patient', 'height', 'width', 'x1', 'y1', 'x2', 'y2', 'score'])
 
     print(f'{len(dataloader)} unique images in annotation file.')
     print(f'Beginning fracture detection on the dataset with model "{parse_args.model_path.split("/")[-1]}":')
