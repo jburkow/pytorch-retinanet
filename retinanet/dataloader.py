@@ -131,7 +131,7 @@ class CocoDataset(Dataset):
 class CSVDataset(Dataset):
     """CSV dataset."""
 
-    def __init__(self, train_file, class_list, metadata_file='', transform=None):
+    def __init__(self, train_file, class_list, preprocessing='', seg_dir='', metadata_file='', transform=None):
         """
         Args:
             train_file (string): CSV file with training annotations
@@ -140,8 +140,12 @@ class CSVDataset(Dataset):
         """
         self.train_file = train_file
         self.class_list = class_list
+        self.preprocessing = preprocessing
+        self.seg_dir = seg_dir
         self.metadata_file = metadata_file
         self.transform = transform
+
+        assert self.preprocessing in ['', 'rib-seg', 'three-filters'], "preprocessing must be one of ['', 'rib-seg', 'three-filters']"
 
         # parse the provided class file
         try:
@@ -271,12 +275,53 @@ class CSVDataset(Dataset):
         return metadata.values.squeeze()
 
     def load_image(self, image_index):
-        img = skimage.io.imread(self.image_names[image_index])
+        img_path = self.image_names[image_index]
+
+        # If no special preprocessing, simply load and return the image
+        if self.preprocessing == '':
+            img = skimage.io.imread(self.image_names[image_index])
+
+            if len(img.shape) == 2:
+                img = skimage.color.gray2rgb(img)
+
+            return img.astype(np.uint8)
+
+        # Get patient ID and associated chest segmentation path
+        patient_id = img_path.split('/')[-1].split('.')[0]
+        seg_path = os.path.join(self.seg_dir, [f for f in os.listdir(self.seg_dir) if patient_id in f][0])
+
+        # Load image
+        img = skimage.io.imread(img_path)
 
         if len(img.shape) == 2:
             img = skimage.color.gray2rgb(img)
 
-        return img.astype(np.uint8)
+        # Load segmentation
+        seg = np.load(seg_path)
+
+        # Extract foreground and convert to 8 bit for OpenCV usage
+        fg = ((seg.sum(axis=-1) - seg[:, :, 0])*255).astype(np.uint8)
+
+        # Zero out (mask) background pixels in original image
+        masked_img = cv2.bitwise_and(img[:, :, 0], img[:, :, 0], mask=fg)
+
+        if self.preprocessing == 'rib-seg':
+            # Extract rough rib segmentation by applying adaptive thresholding to the masked image
+            rib_seg = cv2.adaptiveThreshold(masked_img, 255, cv2.ADAPTIVE_THRESH_GAUSSIAN_C, cv2.THRESH_BINARY, 99, 0)
+
+            # Create 3-channel image of rib segmentation
+            out = np.stack([rib_seg, rib_seg, rib_seg], axis=-1)
+
+            return out.astype(np.uint8)
+        
+        if self.preprocessing == 'three-filters':
+            masked_histeq_img = cv2.equalizeHist(masked_img)  # apply histogram equalization
+            masked_bilateral_img = cv2.bilateralFilter(masked_img, 9, 75, 75)  # apply a bilateral low-pass filter
+
+            # Stack original image, histogram-equalized image, and bilateral filtered image into RGB channels
+            out = np.stack([masked_img, masked_histeq_img, masked_bilateral_img], axis=-1)
+
+            return out.astype(np.uint8)
 
     def load_annotations(self, image_index):
         # get ground truth annotations
@@ -317,6 +362,10 @@ class CSVDataset(Dataset):
 
             try:
                 img_file, x1, y1, x2, y2, class_name = row[:6]
+
+                # If using the "three-filters" preprocessing, use non-histogram-equalized images
+                if self.preprocessing == 'three-filters':
+                    img_file = img_file.replace('cropped_histeq_png', 'cropped_png')
             except ValueError:
                 raise_from(ValueError('line {}: format should be \'img_file,x1,y1,x2,y2,class_name\' or \'img_file,,,,,\''.format(line)), None)
 

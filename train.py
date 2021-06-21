@@ -46,6 +46,7 @@ def main(parser):
 
     # Create folder to save model states to if it doesn't exist
     MODEL_NAME = f'{timestr}'
+    MODEL_NAME += str(parser.preprocessing) if parser.preprocessing != '' else ''
     MODEL_NAME += f'_FiLM-resnet{parser.depth}' if parser.metadata_path != '' else f'_resnet{parser.depth}'
     MODEL_NAME += '_pretrained' if parser.pretrained else ''
     MODEL_NAME += f'_{parser.epochs}epoch'
@@ -87,7 +88,7 @@ def main(parser):
         if parser.csv_classes is None:
             raise ValueError('Must provide --csv_classes when training on CSV.')
 
-        dataset_train = CSVDataset(train_file=parser.csv_train, class_list=parser.csv_classes, metadata_file=parser.metadata_path,
+        dataset_train = CSVDataset(train_file=parser.csv_train, class_list=parser.csv_classes, preprocessing=parser.preprocessing, seg_dir=parser.seg_dir, metadata_file=parser.metadata_path,
                                    transform=transforms.Compose([
                                        Augmenter(augment=parser.augment, metadata=parser.metadata_path != ''),
                                        Normalizer(no_normalize=parser.no_normalize, metadata=parser.metadata_path != ''),
@@ -99,7 +100,7 @@ def main(parser):
             dataset_val = None
             print('No validation annotations provided.')
         else:
-            dataset_val = CSVDataset(train_file=parser.csv_val, class_list=parser.csv_classes, metadata_file=parser.metadata_path,
+            dataset_val = CSVDataset(train_file=parser.csv_val, class_list=parser.csv_classes, preprocessing=parser.preprocessing, seg_dir=parser.seg_dir, metadata_file=parser.metadata_path,
                                      transform=transforms.Compose([
                                         Augmenter(augment=False, metadata=parser.metadata_path != ''),
                                         Normalizer(no_normalize=parser.no_normalize, metadata=parser.metadata_path != ''),
@@ -159,10 +160,11 @@ def main(parser):
     print(f'Backbone: ResNet{parser.depth}')
     if parser.metadata_path != '':
         print(f'Using FiLMed RetinaNet')
+    if parser.preprocessing != '':
+        print(f'Using "{parser.preprocessing}" preprocessing method')
     print()
 
     print(retinanet)
-    # sys.exit()
 
     best_epoch = 0
     best_val_metric = 0.
@@ -306,6 +308,8 @@ if __name__ == '__main__':
     parser.add_argument('--csv_val', help='Path to file containing validation annotations (optional, see readme)')
 
     parser.add_argument('--metadata_path', type=str, default='', help='Path to metadata csv file')
+    parser.add_argument('--seg_dir', type=str, default='', help='Path to directory containing segmentations for each image')
+    parser.add_argument('--preprocessing', type=str, default='', help='Image preprocessing method (one of "", "three-filters", or "rib-seg")')
 
     parser.add_argument('--depth', type=int, default=50,
                         help='Resnet depth, must be one of 18, 34, 50, 101, 152.')
@@ -331,6 +335,8 @@ if __name__ == '__main__':
                         help='Number of epochs of no improvement in validation metric before decreasing learning rate tenfold.')
 
     parser = parser.parse_args()
+
+    assert parser.preprocessing in ['', 'three-filters', 'rib-seg'], "--preprocessing must be one of ['', 'three-filters', 'rib-seg']"
 
     if not parser.pretrained:
         parser.no_normalize = True  # no ImageNet normalization if randomly initializing weights
