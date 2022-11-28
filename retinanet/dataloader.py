@@ -1,28 +1,24 @@
-from __future__ import print_function, division
-import sys
-import os
-import torch
-import numpy as np
-import random
+from __future__ import division, print_function
+
 import csv
+import os
+import random
+import sys
 from copy import deepcopy
 
 import albumentations as A
 import cv2
+import numpy as np
 import pandas as pd
-
-from torch.utils.data import Dataset, DataLoader
-from torchvision import transforms, utils
-from torch.utils.data.sampler import Sampler
-
-from pycocotools.coco import COCO
-
+import skimage
+import skimage.color
 import skimage.io
 import skimage.transform
-import skimage.color
-import skimage
-
+import torch
 from PIL import Image
+from pycocotools.coco import COCO
+from torch.utils.data import Dataset
+from torch.utils.data.sampler import Sampler
 
 
 class CocoDataset(Dataset):
@@ -145,14 +141,12 @@ class CSVDataset(Dataset):
         self.metadata_file = metadata_file
         self.transform = transform
 
-        assert self.preprocessing in ['', 'rib-seg', 'three-filters'], "preprocessing must be one of ['', 'rib-seg', 'three-filters']"
-
         # parse the provided class file
         try:
             with self._open_for_csv(self.class_list) as file:
                 self.classes = self.load_classes(csv.reader(file, delimiter=','))
         except ValueError as e:
-            raise(ValueError('invalid CSV class file: {}: {}'.format(self.class_list, e)))
+            raise ValueError(f'invalid CSV class file: {self.class_list}: {e}')
 
         self.labels = {}
         for key, value in self.classes.items():
@@ -163,7 +157,7 @@ class CSVDataset(Dataset):
             with self._open_for_csv(self.train_file) as file:
                 self.image_data = self._read_annotations(csv.reader(file, delimiter=','), self.classes)
         except ValueError as e:
-            raise(ValueError('invalid CSV annotations file: {}: {}'.format(self.train_file, e)))
+            raise ValueError(f'invalid CSV annotations file: {self.train_file}: {e}')
         self.image_names = list(self.image_data.keys())
 
         # Read and prepare metadata csv
@@ -242,11 +236,11 @@ class CSVDataset(Dataset):
             try:
                 class_name, class_id = row
             except ValueError:
-                raise(ValueError('line {}: format should be \'class_name,class_id\''.format(line)))
+                raise ValueError(f"line {line}: format should be \'class_name,class_id\'")
             class_id = self._parse(class_id, int, 'line {}: malformed class ID: {{}}'.format(line))
 
             if class_name in result:
-                raise ValueError('line {}: duplicate class name: \'{}\''.format(line, class_name))
+                raise ValueError(f"line {line}: duplicate class name: \'{class_name}\'")
             result[class_name] = class_id
         return result
 
@@ -313,7 +307,7 @@ class CSVDataset(Dataset):
             out = np.stack([rib_seg, rib_seg, rib_seg], axis=-1)
 
             return out.astype(np.uint8)
-        
+
         if self.preprocessing == 'three-filters':
             masked_histeq_img = cv2.equalizeHist(masked_img)  # apply histogram equalization
             masked_bilateral_img = cv2.bilateralFilter(masked_img, 9, 75, 75)  # apply a bilateral low-pass filter
@@ -432,7 +426,7 @@ def collater(data):
         padded_imgs[i, :int(img.shape[0]), :int(img.shape[1]), :] = img
 
     max_num_annots = max(annot.shape[0] for annot in annots)
-    
+
     if max_num_annots > 0:
 
         annot_padded = torch.ones((len(annots), max_num_annots, 5)) * -1
@@ -452,6 +446,7 @@ def collater(data):
         return {'img': padded_imgs, 'annot': annot_padded, 'metadata': torch.stack(metadatas), 'scale': scales}
     else:
         return {'img': padded_imgs, 'annot': annot_padded, 'scale': scales}
+
 
 class Resizer(object):
     """Convert ndarrays in sample to Tensors."""
@@ -508,8 +503,9 @@ class Augmenter(object):
             self.transform = A.Compose([
                 A.ShiftScaleRotate(shift_limit=0.1, scale_limit=0.5, rotate_limit=10, border_mode=cv2.BORDER_CONSTANT, value=0, p=0.5),
                 A.HorizontalFlip(p=0.5),
-                A.RandomBrightness(p=0.5),
-                A.RandomContrast(p=0.5),
+                # A.RandomBrightness(p=0.5),  # DEPRECATED IN FUTURE
+                # A.RandomContrast(p=0.5),  # DEPRECATED IN FUTURE
+                A.RandomBrightnessContrast(p=0.5),
                 A.GaussianBlur(p=0.5)
             ], bbox_params=A.BboxParams(format='pascal_voc', min_visibility=0.2, label_fields=['category_id']))
 
@@ -518,25 +514,25 @@ class Augmenter(object):
         if self.metadata:
             metadata = sample['metadata']
 
-        if self.augment:
-            transformed = self.transform(image=image, bboxes=annots[:, :4], category_id=annots[:, 4])
-            transformed['bboxes'] = np.array(transformed['bboxes'])  #.round(0).astype(int)
-            transformed['category_id'] = np.array(transformed['category_id'])
-
-            if transformed['bboxes'].shape[0] == 0:  # if bbox(es) removed by aug s.t. none remain, undo augmentation
-                return sample
-            else:
-                if self.metadata:
-                    return {'img': transformed['image'], 'annot': np.hstack((transformed['bboxes'], transformed['category_id'][:, np.newaxis])), 'metadata': metadata}    
-                else:
-                    return {'img': transformed['image'], 'annot': np.hstack((transformed['bboxes'], transformed['category_id'][:, np.newaxis]))}
-        else:
+        if not self.augment:
             return sample
+
+        transformed = self.transform(image=image, bboxes=annots[:, :4], category_id=annots[:, 4])
+        transformed['bboxes'] = np.array(transformed['bboxes'])  #.round(0).astype(int)
+        transformed['category_id'] = np.array(transformed['category_id'])
+
+        if transformed['bboxes'].shape[0] == 0:  # if bbox(es) removed by aug s.t. none remain, undo augmentation
+            return sample
+
+        if self.metadata:
+            return {'img': transformed['image'], 'annot': np.hstack((transformed['bboxes'], transformed['category_id'][:, np.newaxis])), 'metadata': metadata}
+        else:
+            return {'img': transformed['image'], 'annot': np.hstack((transformed['bboxes'], transformed['category_id'][:, np.newaxis]))}
 
 
 class Normalizer(object):
 
-    def __init__(self, no_normalize, metadata=False):
+    def __init__(self, no_normalize=False, metadata=False):
         self.mean = np.array([[[0.485, 0.456, 0.406]]])
         self.std = np.array([[[0.229, 0.224, 0.225]]])
 
@@ -561,16 +557,11 @@ class Normalizer(object):
             else:
                 return {'img': image, 'annot': annots}
 
+
 class UnNormalizer(object):
     def __init__(self, mean=None, std=None):
-        if mean == None:
-            self.mean = [0.485, 0.456, 0.406]
-        else:
-            self.mean = mean
-        if std == None:
-            self.std = [0.229, 0.224, 0.225]
-        else:
-            self.std = std
+        self.mean = [0.485, 0.456, 0.406] if mean is None else mean
+        self.std = [0.229, 0.224, 0.225] if std is None else std
 
     def __call__(self, tensor):
         """
