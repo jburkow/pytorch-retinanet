@@ -1,9 +1,9 @@
 from __future__ import print_function
 
 import numpy as np
-import matplotlib.pyplot as plt
 import torch
 import tqdm
+
 
 def compute_overlap(a, b):
     """
@@ -71,7 +71,7 @@ def _get_detections(dataset, retinanet, score_threshold=0.05, max_detections=100
     # Returns
         A list of lists containing the detections for each image in the generator.
     """
-    all_detections = [[None for i in range(dataset.num_classes())] for j in range(len(dataset))]
+    all_detections = [[None for _ in range(dataset.num_classes())] for _ in range(len(dataset))]
 
     retinanet.eval()
 
@@ -93,6 +93,7 @@ def _get_detections(dataset, retinanet, score_threshold=0.05, max_detections=100
                     scores, labels, boxes = retinanet(data['img'].permute(2, 0, 1).cuda().float().unsqueeze(dim=0))
                 else:
                     scores, labels, boxes = retinanet(data['img'].permute(2, 0, 1).float().unsqueeze(dim=0))
+
             scores = scores.cpu().numpy()
             labels = labels.cpu().numpy()
             boxes  = boxes.cpu().numpy()
@@ -135,7 +136,7 @@ def _get_annotations(generator):
     # Returns
         A list of lists containing the annotations for each image in the generator.
     """
-    all_annotations = [[None for i in range(generator.num_classes())] for j in range(len(generator))]
+    all_annotations = [[None for _ in range(generator.num_classes())] for _ in range(len(generator))]
 
     pbar = tqdm.tqdm(range(len(generator)), desc='Getting annotations')
     for i in pbar:
@@ -156,8 +157,7 @@ def evaluate(
     iou_threshold=0.5,
     score_threshold=0.05,
     max_detections=100,
-    metadata=False,
-    save_path=None
+    metadata=False
 ):
     """ Evaluate a given dataset using a given retinanet.
     # Arguments
@@ -166,7 +166,6 @@ def evaluate(
         iou_threshold   : The threshold used to consider when a detection is positive or negative.
         score_threshold : The score confidence threshold to use for detections.
         max_detections  : The maximum number of detections to use per image.
-        save_path       : The path to save precision recall curve of each label.
     # Returns
         A dict mapping class names to mAP scores.
     """
