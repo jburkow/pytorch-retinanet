@@ -107,3 +107,4 @@ bash_scripts/
 old_scripts/
 *.sb
 *.pth
+*.csv
