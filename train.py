@@ -219,7 +219,7 @@ def main(parser):
 
         elif parser.dataset == 'csv' and parser.csv_val is not None:
             print(f'\n{"-"*20} EPOCH {epoch_num} VALIDATION {"-"*20}')
-            mAP, max_F1, max_F1_pr, max_F1_re, max_F2, max_F2_pr, max_F2_re = csv_eval.evaluate(dataset_val, retinanet, save_path=save_dir)
+            mAP, max_F1, max_F1_pr, max_F1_re, max_F2, max_F2_pr, max_F2_re = csv_eval.evaluate(dataset_val, retinanet)
 
         if dataset_train.num_classes() > 1:
             # val_metric to use if more than one class
