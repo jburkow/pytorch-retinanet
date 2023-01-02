@@ -107,5 +107,7 @@ ENV/
 bash_scripts/
 old_scripts/
 *.sb
+*.sh
 *.pth
 *.csv
+*sbatch*
