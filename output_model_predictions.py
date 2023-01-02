@@ -8,22 +8,23 @@ Description: Used a trained model to predict bounding boxes on a set of
     image with their corresponding scores.
 '''
 
-import os
-import time
 import argparse
 import csv
+import os
 import random
+import time
+from math import ceil, floor
 
-from math import floor, ceil
 import cv2
 import numpy as np
 import pandas as pd
-from tqdm import tqdm
 import torch
+from retinanet.dataloader import (AspectRatioBasedSampler, Augmenter,
+                                  CSVDataset, Normalizer, Resizer, collater)
 from torch.utils.data import DataLoader
 from torchvision import transforms
+from tqdm import tqdm
 
-from retinanet.dataloader import CSVDataset, collater, Resizer, AspectRatioBasedSampler, Augmenter, Normalizer
 
 def val_worker_init_fn(worker_id):
     np.random.seed(worker_id)
@@ -46,16 +47,17 @@ def main(parse_args):
     if torch.cuda.is_available():
         model = model.cuda()
 
-    print(model)
+    # print(model)
 
     # Convert the model to evaluation mode
     model.eval()
 
     # Create prediction data frame (with image height and width if using "old" format)
-    if parse_args.old:
-        prediction_dict = pd.DataFrame(columns=['Patient', 'x1', 'y1', 'x2', 'y2', 'score'])
-    else:
-        prediction_dict = pd.DataFrame(columns=['Patient', 'height', 'width', 'x1', 'y1', 'x2', 'y2', 'score'])
+    prediction_dict = pd.DataFrame(columns=['Patient', 'x1', 'y1', 'x2', 'y2', 'score'])
+    # if parse_args.old:
+    #     prediction_dict = pd.DataFrame(columns=['Patient', 'x1', 'y1', 'x2', 'y2', 'score'])
+    # else:
+    #     prediction_dict = pd.DataFrame(columns=['Patient', 'height', 'width', 'x1', 'y1', 'x2', 'y2', 'score'])
 
     print(f'{len(dataloader)} unique images in annotation file.')
     print(f'Beginning fracture detection on the dataset with model "{parse_args.model_path.split("/")[-1]}":')
@@ -98,8 +100,8 @@ def main(parse_args):
                                                           ignore_index=True)
             else:
                 prediction_dict = prediction_dict.append({'Patient' : file,
-                                                          'height' : img.shape[0],
-                                                          'width' : img.shape[1],
+                                                        #   'height' : img.shape[0],
+                                                        #   'width' : img.shape[1],
                                                           'x1' : pd.NA,
                                                           'y1' : pd.NA,
                                                           'x2' : pd.NA,
@@ -121,8 +123,8 @@ def main(parse_args):
                                                               ignore_index=True)
                 else:
                     prediction_dict = prediction_dict.append({'Patient' : file,
-                                                              'height' : img.shape[0],
-                                                              'width' : img.shape[1],
+                                                            #   'height' : img.shape[0],
+                                                            #   'width' : img.shape[1],
                                                               'x1' : int(floor(box[0].item())),
                                                               'y1' : int(floor(box[1].item())),
                                                               'x2' : int(ceil(box[2].item())),
@@ -176,14 +178,9 @@ if __name__ == '__main__':
     if not parser_args.model_path:
         parser.error('Please provide a path to the trained model file.')
 
-    # Print out start of execution
-    print('Starting execution...')
+    print('\nStarting execution...')
     start_time = time.perf_counter()
-
-    # Run main function
     main(parser_args)
-
-    # Print out time to complete
+    elapsed = time.perf_counter() - start_time
     print('Done!')
-    end_time = time.perf_counter()
-    print('Execution finished in {} seconds.'.format(round(end_time - start_time, 3)))
+    print(f'Execution finished in {elapsed:.3f} seconds ({time.strftime("%-H hr, %-M min, %-S sec", time.gmtime(elapsed))}).\n')
