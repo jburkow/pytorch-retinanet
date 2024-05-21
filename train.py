@@ -48,6 +48,8 @@ def main(parser):
     MODEL_NAME += f'_{parser.epochs}epoch'
     MODEL_NAME += '_no-norm' if parser.no_normalize else ''
     MODEL_NAME += '_aug' if parser.augment else ''
+    MODEL_NAME += f'_alpha{parser.alpha}'
+    MODEL_NAME += f'_gamma{parser.gamma}'
     MODEL_NAME += f'_lr{parser.lr}'
     MODEL_NAME += f'_bs{parser.batch}'
     MODEL_NAME += f'_patience{parser.lr_patience}-{parser.patience}' if parser.patience != 0 else f'_patience{parser.lr_patience}'
@@ -114,15 +116,15 @@ def main(parser):
 
     # Create the model
     if parser.depth == 18:
-        retinanet = model.resnet18(num_classes=dataset_train.num_classes(), pretrained=parser.pretrained, FiLMed=parser.metadata_path != '')
+        retinanet = model.resnet18(num_classes=dataset_train.num_classes(), pretrained=parser.pretrained, FiLMed=parser.metadata_path != '', alpha=parser.alpha, gamma=parser.gamma)
     if parser.depth == 34:
-        retinanet = model.resnet34(num_classes=dataset_train.num_classes(), pretrained=parser.pretrained, FiLMed=parser.metadata_path != '')
+        retinanet = model.resnet34(num_classes=dataset_train.num_classes(), pretrained=parser.pretrained, FiLMed=parser.metadata_path != '', alpha=parser.alpha, gamma=parser.gamma)
     if parser.depth == 50:
-        retinanet = model.resnet50(num_classes=dataset_train.num_classes(), pretrained=parser.pretrained, FiLMed=parser.metadata_path != '')
+        retinanet = model.resnet50(num_classes=dataset_train.num_classes(), pretrained=parser.pretrained, FiLMed=parser.metadata_path != '', alpha=parser.alpha, gamma=parser.gamma)
     if parser.depth == 101:
-        retinanet = model.resnet101(num_classes=dataset_train.num_classes(), pretrained=parser.pretrained, FiLMed=parser.metadata_path != '')
+        retinanet = model.resnet101(num_classes=dataset_train.num_classes(), pretrained=parser.pretrained, FiLMed=parser.metadata_path != '', alpha=parser.alpha, gamma=parser.gamma)
     if parser.depth == 152:
-        retinanet = model.resnet152(num_classes=dataset_train.num_classes(), pretrained=parser.pretrained, FiLMed=parser.metadata_path != '')
+        retinanet = model.resnet152(num_classes=dataset_train.num_classes(), pretrained=parser.pretrained, FiLMed=parser.metadata_path != '', alpha=parser.alpha, gamma=parser.gamma)
 
     # Move model to cuda if GPU is available
     if torch.cuda.is_available():
@@ -149,6 +151,8 @@ def main(parser):
     print(f'Epochs: {parser.epochs}')
     print(f'Batch size: {parser.batch}')
     print(f'Backbone: ResNet{parser.depth}')
+    print(f"Alpha value: {parser.alpha}")
+    print(f"Gamma value: {parser.gamma}")
     if parser.metadata_path != '':
         print('Using FiLMed RetinaNet')
     if parser.preprocessing != '':
@@ -307,6 +311,10 @@ def parse_args():
                         help='Number of epochs of no improvement in validation metric before decreasing learning rate tenfold.')
     parser.add_argument('--train_val_split', type=str, default=0,
                         help='The train/val split used for the current model training.')
+    parser.add_argument('--alpha', type=float, default=0.25,
+                        help='Balancing hyperparameter for the loss function.')
+    parser.add_argument('--gamma', type=float, default=2.0,
+                        help='Exponent parameter for focusing term in focal loss.')
     parser.add_argument('--save_name', type=str,
                         help='String to add to the model name to save file and model as.')
     parser.add_argument('--csv_negative', type=str, help='Path to file containing negative annotations')
