@@ -3,9 +3,9 @@ import math
 import torch
 import torch.nn as nn
 import torch.utils.model_zoo as model_zoo
-from retinanet import losses
 from retinanet.anchors import Anchors
-from retinanet.filmed_model import FiLMedResNet
+from retinanet.losses import FocalLoss
+# from retinanet.filmed_model import FiLMedResNet
 from retinanet.utils import BasicBlock, BBoxTransform, Bottleneck, ClipBoxes
 from torchvision.ops import nms
 
@@ -155,9 +155,9 @@ class ClassificationModel(nn.Module):
 
 
 class ResNet(nn.Module):
-    def __init__(self, num_classes, block, layers):
-        self.inplanes = 64
+    def __init__(self, num_classes, block, layers, alpha, gamma):
         super(ResNet, self).__init__()
+        self.inplanes = 64
         self.conv1 = nn.Conv2d(3, 64, kernel_size=7, stride=2, padding=3, bias=False)
         self.bn1 = nn.BatchNorm2d(64)
         self.relu = nn.ReLU(inplace=True)
@@ -187,7 +187,7 @@ class ResNet(nn.Module):
 
         self.clipBoxes = ClipBoxes()
 
-        self.focalLoss = losses.FocalLoss()
+        self.focalLoss = FocalLoss(alpha=alpha, gamma=gamma)
 
         for m in self.modules():
             if isinstance(m, nn.Conv2d):
@@ -298,7 +298,7 @@ class ResNet(nn.Module):
         return [finalScores, finalAnchorBoxesIndexes, finalAnchorBoxesCoordinates]
 
 
-def resnet18(num_classes, pretrained=False, FiLMed=False, **kwargs):
+def resnet18(num_classes, pretrained=False, FiLMed=False, alpha=0.25, gamma=2.0, **kwargs):
     """Constructs a ResNet-18 model.
     Args:
         pretrained (bool): If True, returns a model pre-trained on ImageNet
@@ -306,14 +306,14 @@ def resnet18(num_classes, pretrained=False, FiLMed=False, **kwargs):
     if FiLMed:
         model = FiLMedResNet(num_classes, BasicBlock, [2, 2, 2, 2], **kwargs)
     else:
-        model = ResNet(num_classes, BasicBlock, [2, 2, 2, 2], **kwargs)
+        model = ResNet(num_classes, BasicBlock, [2, 2, 2, 2], alpha=alpha, gamma=gamma, **kwargs)
 
     if pretrained:
         model.load_state_dict(model_zoo.load_url(model_urls['resnet18'], model_dir='.'), strict=False)
     return model
 
 
-def resnet34(num_classes, pretrained=False, FiLMed=False, **kwargs):
+def resnet34(num_classes, pretrained=False, FiLMed=False, alpha=0.25, gamma=2.0, **kwargs):
     """Constructs a ResNet-34 model.
     Args:
         pretrained (bool): If True, returns a model pre-trained on ImageNet
@@ -321,14 +321,14 @@ def resnet34(num_classes, pretrained=False, FiLMed=False, **kwargs):
     if FiLMed:
         model = FiLMedResNet(num_classes, BasicBlock, [3, 4, 6, 3], **kwargs)
     else:
-        model = ResNet(num_classes, BasicBlock, [3, 4, 6, 3], **kwargs)
+        model = ResNet(num_classes, BasicBlock, [3, 4, 6, 3], alpha=alpha, gamma=gamma, **kwargs)
 
     if pretrained:
         model.load_state_dict(model_zoo.load_url(model_urls['resnet34'], model_dir='.'), strict=False)
     return model
 
 
-def resnet50(num_classes, pretrained=False, FiLMed=False, weights_path=None, **kwargs):
+def resnet50(num_classes, pretrained=False, FiLMed=False, weights_path=None, alpha=0.25, gamma=2.0, **kwargs):
     """Constructs a ResNet-50 model.
     Args:
         pretrained (bool): If True, returns a model pre-trained on ImageNet
@@ -336,7 +336,7 @@ def resnet50(num_classes, pretrained=False, FiLMed=False, weights_path=None, **k
     if FiLMed:
         model = FiLMedResNet(num_classes, Bottleneck, [3, 4, 6, 3], **kwargs)
     else:
-        model = ResNet(num_classes, Bottleneck, [3, 4, 6, 3], **kwargs)
+        model = ResNet(num_classes, Bottleneck, [3, 4, 6, 3], alpha, gamma, **kwargs)
 
     if pretrained:
         if weights_path is None:
@@ -346,7 +346,7 @@ def resnet50(num_classes, pretrained=False, FiLMed=False, weights_path=None, **k
     return model
 
 
-def resnet101(num_classes, pretrained=False, FiLMed=False, **kwargs):
+def resnet101(num_classes, pretrained=False, FiLMed=False, alpha=0.25, gamma=2.0, **kwargs):
     """Constructs a ResNet-101 model.
     Args:
         pretrained (bool): If True, returns a model pre-trained on ImageNet
@@ -354,14 +354,14 @@ def resnet101(num_classes, pretrained=False, FiLMed=False, **kwargs):
     if FiLMed:
         model = FiLMedResNet(num_classes, Bottleneck, [3, 4, 23, 3], **kwargs)    
     else:
-        model = ResNet(num_classes, Bottleneck, [3, 4, 23, 3], **kwargs)
+        model = ResNet(num_classes, Bottleneck, [3, 4, 23, 3], alpha=alpha, gamma=gamma, **kwargs)
 
     if pretrained:
         model.load_state_dict(model_zoo.load_url(model_urls['resnet101'], model_dir='.'), strict=False)
     return model
 
 
-def resnet152(num_classes, pretrained=False, FiLMed=False, **kwargs):
+def resnet152(num_classes, pretrained=False, FiLMed=False, alpha=0.25, gamma=2.0, **kwargs):
     """Constructs a ResNet-152 model.
     Args:
         pretrained (bool): If True, returns a model pre-trained on ImageNet
@@ -369,7 +369,7 @@ def resnet152(num_classes, pretrained=False, FiLMed=False, **kwargs):
     if FiLMed:
         model = FiLMedResNet(num_classes, Bottleneck, [3, 8, 36, 3], **kwargs)
     else:
-        model = ResNet(num_classes, Bottleneck, [3, 8, 36, 3], **kwargs)
+        model = ResNet(num_classes, Bottleneck, [3, 8, 36, 3], alpha=alpha, gamma=gamma, **kwargs)
 
     if pretrained:
         model.load_state_dict(model_zoo.load_url(model_urls['resnet152'], model_dir='.'), strict=False)
